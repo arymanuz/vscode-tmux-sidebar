@@ -11,36 +11,51 @@ Easily manage your Tmux sessions, windows, and panes in the VS Code sidebar.
 -   **🌲 Tree View**: Displays all Tmux elements in a clear tree structure: Session -> Window -> Pane.
 -   **🖱️ One-Click Actions**:
     -   **Quick Attach**: Click the launch icon (▶) next to any session, window, or pane to attach it in the VS Code integrated terminal.
-    -   **Smart Terminal Reuse**: Automatically reuses open terminals to avoid clutter.
+    -   **Smart Terminal Reuse**: Reuses the terminal already attached to a session instead of opening another one.
 -   **⚡ Efficient Management**:
     -   **Sessions**: Create, rename, and delete.
     -   **Windows**: Quickly create new windows via inline icons or the context menu.
-    -   **Panes**: Split panes horizontally/vertically or close them using inline icons or the context menu.
+    -   **Panes**: Split right or down with a single click, or close them.
+-   **🪟 Windows Support**: Uses [psmux](https://github.com/psmux/psmux) on Windows and `tmux` everywhere else, picked automatically — see [Requirements](#-requirements).
+-   **🧹 Clean Terminal Behaviour**: Tmux runs as the terminal's own process, so leaving it closes the tab, and relaunching a terminal reattaches instead of leaving you in a bare shell.
 -   **Intuitive UI**:
     -   **Inline Icons**: Hover over any item to see common action icons for direct operations.
     -   **Context Menu**: A full context menu provides access to all management features.
 
+## 📋 Requirements
+
+-   **`tmux`** on Linux and macOS.
+-   **[`psmux`](https://github.com/psmux/psmux)** on Windows — a native, tmux-compatible multiplexer (`winget install psmux`).
+
+Which one is used depends on where the extension actually runs, not on where the
+VS Code window is: connected to WSL, an SSH host or a container, it uses `tmux`
+on that machine. Only a local Windows setup uses `psmux`.
+
+If the binary is missing, the extension says so and gives you the install command
+for your system.
+
 ## 🚀 Installation
 
-### Method 1: From the VS Code Marketplace (Recommended)
+The extension is not published to the VS Code Marketplace yet, so install it from
+a `.vsix` file:
 
-1.  Open VS Code.
-2.  Go to the Extensions view (`Ctrl+Shift+X`).
-3.  Search for `Tmux Sidebar for VS Code`.
-4.  Click **Install**.
-
-### Method 2: Manual Installation from a `.vsix` file
-
-1.  Download the latest `.vsix` file from the [Releases page](https://github.com/arymanuz/vscode-tmux-sidebar/releases).
-2.  In VS Code, open the Extensions view.
+1.  Download the latest `.vsix` from the [Releases page](https://github.com/arymanuz/vscode-tmux-sidebar/releases), or build one yourself (see [Development](#-development)).
+2.  In VS Code, open the Extensions view (`Ctrl+Shift+X`).
 3.  Click the `...` (More Actions) button at the top of the view.
-4.  Select **Install from VSIX...**.
-5.  Choose the `.vsix` file you downloaded to install.
+4.  Select **Install from VSIX...** and choose the file.
+
+Or from the command line:
+
+```shell
+code --install-extension vscode-tmux-sidebar-1.0.0.vsix
+```
 
 ## 📖 Usage
 
 1.  **Open the View**: Click the **Tmux icon** in the VS Code Activity Bar on the left to see all your running Tmux sessions.
 2.  **Refresh**: Click the refresh button in the view's title bar to manually sync the Tmux state.
+
+With no sessions running, the view offers a button to create the first one.
 
 ### Session Actions
 -   **Attach**: Click the **▶** icon to the right of the session item.
@@ -54,19 +69,38 @@ Easily manage your Tmux sessions, windows, and panes in the VS Code sidebar.
 
 ### Pane Actions
 -   **Attach**: Click the **▶** icon to the right of the pane item to switch to that pane.
--   **Split Pane**: Click the **+** icon to the right of the pane item and choose a split direction (right or down). You can also use the context menu.
+-   **Split Pane**: Click the split icons to the right of the pane item to split it right or down. Both are also in the context menu.
 -   **Close**: Right-click the pane and select "Kill Pane".
 
-## 🎒 Packaging the Extension
+## 🎒 Development
+
 ```shell
-npm install -g vsce
+npm install          # install dependencies
+npm run compile      # build src/ into out/
+npm run watch        # rebuild on change
+```
+
+Press `F5` to launch a second VS Code window with the extension loaded.
+
+To build an installable package:
+
+```shell
+npm install -g @vscode/vsce
 vsce package
 ```
 
-## 📋 Requirements
+The gallery icon is generated from its SVG source and is not drawn by hand:
 
--   **`tmux`** must be installed on your system.
+```shell
+rsvg-convert -w 128 -h 128 -o resources/icon-gallery.png resources/icon-gallery.svg
+```
+
+## 🙏 Credits
+
+This is a fork of [vscode-tmux-manager](https://github.com/ZeroRegister/vscode-tmux-manager)
+by ZeroRegister. See the [changelog](./CHANGELOG.md) for what has changed since.
 
 ## 📄 License
 
 This project is licensed under the [MIT](https://opensource.org/licenses/MIT) License.
+Copyright is held by the original author and by contributors to this fork; see [LICENSE](./LICENSE).
