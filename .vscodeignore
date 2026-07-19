@@ -1,1 +1,16 @@
-node_modules
+node_modules/
+
+# TypeScript sources and build config — only the compiled out/ runs at runtime
+src/
+tsconfig.json
+**/*.map
+
+# Editor / repo files that have no meaning inside the package
+.vscode/
+.gitignore
+.vscodeignore
+*.vsix
+
+# README images are rewritten by vsce to absolute repository URLs, so the
+# marketplace and the extension details view load them from GitHub, not from here
+assets/
