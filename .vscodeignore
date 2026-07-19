@@ -5,6 +5,9 @@ src/
 tsconfig.json
 **/*.map
 
+# Source of the gallery icon; only the generated icon.png is needed
+resources/icon-gallery.svg
+
 # Editor / repo files that have no meaning inside the package
 .vscode/
 .gitignore
