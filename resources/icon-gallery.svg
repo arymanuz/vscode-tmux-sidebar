@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <!-- Source for resources/icon.png (the marketplace gallery tile).
-       Regenerate with: rsvg-convert -w 128 -h 128 -o resources/icon.png resources/icon-gallery.svg
+  <!-- Source for resources/icon-gallery.png (the marketplace gallery tile).
+       Regenerate with: rsvg-convert -w 128 -h 128 -o resources/icon-gallery.png resources/icon-gallery.svg
        Unlike resources/icon.svg (the activity bar icon, which is transparent and
        uses currentColor), the gallery tile needs its own background and explicit
        colours because it is shown on both light and dark marketplace pages. -->

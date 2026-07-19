@@ -4,7 +4,7 @@
   "description": "A simple extension to view and attach to running tmux sessions from the VS Code sidebar.",
   "version": "0.2.0",
   "publisher": "arymanuz",
-  "icon": "resources/icon.png",
+  "icon": "resources/icon-gallery.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/arymanuz/vscode-tmux-sidebar.git"
