@@ -5,6 +5,13 @@ import { TmuxSession, TmuxWindow, TmuxPane } from './types';
 
 const exec = util.promisify(cp.exec);
 
+// Which multiplexer binary to call. This is decided by the OS the extension
+// host actually runs on — which is the machine tmux commands execute against.
+// In a WSL / SSH / container remote the host is Linux, so `process.platform`
+// is 'linux' and we correctly use tmux there, even if the UI is on Windows.
+// Only a genuinely local Windows host reports 'win32' and uses psmux.
+export const TMUX_BIN = process.platform === 'win32' ? 'psmux' : 'tmux';
+
 interface CacheEntry {
     data: TmuxSession[];
     timestamp: number;
@@ -21,35 +28,106 @@ export class TmuxService {
         }
         
         try {
-            await exec('tmux -V');
+            await exec(`${TMUX_BIN} -V`);
             this.tmuxInstalled = true;
             return true;
         } catch (error) {
             this.tmuxInstalled = false;
-            vscode.window.showErrorMessage('tmux is not installed or not in PATH. Please install tmux to use this extension.');
+            vscode.window.showErrorMessage(await this.buildMissingBinaryMessage());
             return false;
         }
+    }
+
+    private async buildMissingBinaryMessage(): Promise<string> {
+        if (process.platform === 'win32') {
+            return `"psmux" was not found on your PATH. On Windows this extension uses psmux (a native, tmux-compatible multiplexer). Install it with "winget install psmux", then reload the window.`;
+        }
+
+        const installCommand = await this.detectInstallCommand();
+        return installCommand
+            ? `"tmux" was not found on your PATH. Install it with "${installCommand}", then reload the window.`
+            : `"tmux" was not found on your PATH. Install it with your system's package manager, then reload the window.`;
+    }
+
+    // Probe for the package manager that is actually present so the user gets a
+    // single command that works on their system, instead of a list to pick from.
+    private async detectInstallCommand(): Promise<string | undefined> {
+        const candidates = process.platform === 'darwin'
+            ? [
+                { bin: 'brew', command: 'brew install tmux' },
+                { bin: 'port', command: 'sudo port install tmux' }
+            ]
+            : [
+                { bin: 'apt-get', command: 'sudo apt install tmux' },
+                { bin: 'dnf', command: 'sudo dnf install tmux' },
+                { bin: 'pacman', command: 'sudo pacman -S tmux' },
+                { bin: 'zypper', command: 'sudo zypper install tmux' },
+                { bin: 'apk', command: 'sudo apk add tmux' }
+            ];
+
+        for (const { bin, command } of candidates) {
+            try {
+                await exec(`command -v ${bin}`);
+                return command;
+            } catch {
+                // Not this package manager — try the next one.
+            }
+        }
+
+        return undefined;
     }
 
     private isCacheValid(): boolean {
         return this.cache !== null && (Date.now() - this.cache.timestamp) < this.CACHE_DURATION;
     }
 
-    private async getTmuxData(): Promise<TmuxSession[]> {
-        try {
-            const [sessionsOutput, windowsOutput, panesOutput] = await Promise.all([
-                exec('tmux list-sessions -F "#{session_name}:#{session_attached}:#{session_created}:#{session_activity}"'),
-                exec('tmux list-windows -a -F "#{session_name}:#{window_index}:#{window_name}:#{window_active}"'),
-                exec('tmux list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_current_command}:#{pane_current_path}:#{pane_active}:#{pane_pid}"')
-            ]);
+    // When no tmux server is running, tmux exits non-zero with a message that
+    // varies between versions ("no server running on ...", "error connecting
+    // to ... (No such file or directory)"). Treat all of these as "nothing to
+    // show" rather than a real failure.
+    private isNoServerError(error: unknown): boolean {
+        const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+        return message.includes('no server running')
+            || message.includes('error connecting')
+            || message.includes('no such file or directory')
+            || message.includes('no sessions');
+    }
 
-            return this.parseTmuxData(sessionsOutput.stdout, windowsOutput.stdout, panesOutput.stdout);
+    private async getTmuxData(): Promise<TmuxSession[]> {
+        // Query sessions first. If no server is running (or there are no
+        // sessions), bail out here so we never call list-windows/list-panes
+        // against a non-existent server, which would otherwise error out.
+        let sessionsOutput: string;
+        try {
+            const result = await exec(`${TMUX_BIN} list-sessions -F "#{session_name}:#{session_attached}:#{session_created}:#{session_activity}"`);
+            sessionsOutput = result.stdout;
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            if (errorMessage.includes('no server running')) {
-                // No tmux server running is not an error, just return empty array
+            if (this.isNoServerError(error)) {
                 return [];
             }
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Failed to get tmux data: ${errorMessage}`);
+            throw error;
+        }
+
+        if (!sessionsOutput.trim()) {
+            // Server is up but has no sessions — nothing to show.
+            return [];
+        }
+
+        try {
+            const [windowsOutput, panesOutput] = await Promise.all([
+                exec(`${TMUX_BIN} list-windows -a -F "#{session_name}:#{window_index}:#{window_name}:#{window_active}"`),
+                exec(`${TMUX_BIN} list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_current_command}:#{pane_current_path}:#{pane_active}:#{pane_pid}"`)
+            ]);
+
+            return this.parseTmuxData(sessionsOutput, windowsOutput.stdout, panesOutput.stdout);
+        } catch (error) {
+            if (this.isNoServerError(error)) {
+                // Sessions may have been torn down between calls — treat as empty.
+                return [];
+            }
+            const errorMessage = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Failed to get tmux data: ${errorMessage}`);
             throw error;
         }
@@ -167,8 +245,8 @@ export class TmuxService {
     public async getTmuxTreeLegacy(): Promise<TmuxSession[]> {
         try {
             const [windowsOutput, panesOutput] = await Promise.all([
-                exec('tmux list-windows -a -F "#{session_name}:#{window_index}:#{window_name}"'),
-                exec('tmux list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_current_command}"')
+                exec(`${TMUX_BIN} list-windows -a -F "#{session_name}:#{window_index}:#{window_name}"`),
+                exec(`${TMUX_BIN} list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_current_command}"`)
             ]);
 
             const panesByWindow: { [key: string]: TmuxPane[] } = {};
@@ -232,14 +310,14 @@ export class TmuxService {
         }
         
         try {
-            const { stdout } = await exec('tmux ls -F "#{session_name}"');
+            const { stdout } = await exec(`${TMUX_BIN} ls -F "#{session_name}"`);
             if (stdout && stdout.trim()) {
                 return stdout.trim().split('\n').filter(name => name.length > 0);
             }
             return [];
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            if (!errorMessage.includes('no server running')) {
+            if (!this.isNoServerError(error)) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
                 vscode.window.showWarningMessage(`Failed to get sessions: ${errorMessage}`);
             }
             return [];
@@ -252,7 +330,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux rename-session -t "${oldName}" "${newName}"`);
+            await exec(`${TMUX_BIN} rename-session -t "${oldName}" "${newName}"`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Session renamed from "${oldName}" to "${newName}"`);
         } catch (error) {
@@ -268,7 +346,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux rename-window -t "${sessionName}:${windowIndex}" "${newName}"`);
+            await exec(`${TMUX_BIN} rename-window -t "${sessionName}:${windowIndex}" "${newName}"`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Window ${windowIndex} renamed to "${newName}"`);
         } catch (error) {
@@ -286,11 +364,11 @@ export class TmuxService {
 
     public async newSession(sessionName: string): Promise<void> {
         if (!await this.checkTmuxInstallation()) {
-            throw new Error('tmux is not installed');
+            throw new Error(`${TMUX_BIN} is not installed`);
         }
         
         try {
-            await exec(`tmux new-session -d -s "${sessionName}"`);
+            await exec(`${TMUX_BIN} new-session -d -s "${sessionName}"`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Created new session "${sessionName}"`);
         } catch (error) {
@@ -310,7 +388,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux kill-session -t "${sessionName}"`);
+            await exec(`${TMUX_BIN} kill-session -t "${sessionName}"`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Deleted session "${sessionName}"`);
         } catch (error) {
@@ -330,7 +408,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux kill-window -t "${sessionName}:${windowIndex}"`);
+            await exec(`${TMUX_BIN} kill-window -t "${sessionName}:${windowIndex}"`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Killed window ${windowIndex} in session "${sessionName}"`);
         } catch (error) {
@@ -350,7 +428,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux kill-pane -t "${sessionName}:${windowIndex}.${paneIndex}"`);
+            await exec(`${TMUX_BIN} kill-pane -t "${sessionName}:${windowIndex}.${paneIndex}"`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Killed pane ${paneIndex} in window ${windowIndex}`);
         } catch (error) {
@@ -370,7 +448,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux select-window -t "${sessionName}:${windowIndex}"`);
+            await exec(`${TMUX_BIN} select-window -t "${sessionName}:${windowIndex}"`);
         } catch (error) {
             // Don't show error message here, as it might be confusing if attach works.
             // But log it for debugging
@@ -384,7 +462,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux select-pane -t "${sessionName}:${windowIndex}.${paneIndex}"`);
+            await exec(`${TMUX_BIN} select-pane -t "${sessionName}:${windowIndex}.${paneIndex}"`);
         } catch (error) {
             // Don't show error message here.
             // But log it for debugging
@@ -398,7 +476,7 @@ export class TmuxService {
         }
         
         try {
-            let command = `tmux new-window -t "${sessionName}"`;
+            let command = `${TMUX_BIN} new-window -t "${sessionName}"`;
             if (windowName) {
                 command += ` -n "${windowName}"`;
             }
@@ -426,7 +504,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`tmux split-window -t "${targetPane}" -${direction}`);
+            await exec(`${TMUX_BIN} split-window -t "${targetPane}" -${direction}`);
             this.clearCache(); // Clear cache after modification
             const directionText = direction === 'h' ? 'horizontally' : 'vertically';
             vscode.window.showInformationMessage(`Split pane ${directionText}`);

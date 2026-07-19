@@ -1,8 +1,4 @@
-# Tmux Session Manager for VS Code
-
-English | [简体中文](./README_zh.md)
-
-[![VS Code Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/ZeroRegister.vscode-tmux-manager?style=flat-square&label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=ZeroRegister.vscode-tmux-manager)
+# Tmux Sidebar for VS Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -30,12 +26,12 @@ Easily manage your Tmux sessions, windows, and panes in the VS Code sidebar.
 
 1.  Open VS Code.
 2.  Go to the Extensions view (`Ctrl+Shift+X`).
-3.  Search for `vscode-tmux-manager`.
+3.  Search for `Tmux Sidebar for VS Code`.
 4.  Click **Install**.
 
 ### Method 2: Manual Installation from a `.vsix` file
 
-1.  Download the latest `.vsix` file from the [Releases page](https://github.com/ZeroRegister/vscode-tmux-manager/releases).
+1.  Download the latest `.vsix` file from the [Releases page](https://github.com/arymanuz/vscode-tmux-sidebar/releases).
 2.  In VS Code, open the Extensions view.
 3.  Click the `...` (More Actions) button at the top of the view.
 4.  Select **Install from VSIX...**.

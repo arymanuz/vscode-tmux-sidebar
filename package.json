@@ -1,127 +1,120 @@
 {
-  "name": "vscode-tmux-manager",
-  "displayName": "vscode-tmux-manager",
+  "name": "vscode-tmux-sidebar",
+  "displayName": "Tmux Sidebar",
   "description": "A simple extension to view and attach to running tmux sessions from the VS Code sidebar.",
   "version": "0.2.0",
-  "publisher": "ZeroRegister",
+  "publisher": "arymanuz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ZeroRegister/vscode-tmux-manager.git"
+    "url": "https://github.com/arymanuz/vscode-tmux-sidebar.git"
   },
   "engines": {
     "vscode": "^1.85.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Other"
   ],
   "activationEvents": [
-    "onView:vscode-tmux-manager"
+    "onView:vscode-tmux-sidebar"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "tmux-manager",
-          "title": "Tmux Manager",
+          "id": "tmux-sidebar",
+          "title": "Tmux Sidebar",
           "icon": "resources/icon.svg"
         }
       ]
     },
     "views": {
-      "tmux-manager": [
+      "tmux-sidebar": [
         {
-          "id": "vscode-tmux-manager",
+          "id": "vscode-tmux-sidebar",
           "name": "Sessions"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "vscode-tmux-sidebar",
+        "contents": "No active tmux sessions yet.\n[New Session](command:vscode-tmux-sidebar.new)\ntmux must be installed and running on your system."
+      }
+    ],
     "commands": [
       {
-        "command": "vscode-tmux-manager.attach",
+        "command": "vscode-tmux-sidebar.attach",
         "title": "Attach to Session",
         "category": "Tmux",
         "icon": "$(debug-start)"
       },
       {
-        "command": "vscode-tmux-manager.refresh",
+        "command": "vscode-tmux-sidebar.refresh",
         "title": "Refresh Sessions",
         "category": "Tmux",
-        "icon": {
-          "light": "resources/light/refresh.svg",
-          "dark": "resources/dark/refresh.svg"
-        }
+        "icon": "$(refresh)"
       },
       {
-        "command": "vscode-tmux-manager.toggleAutoRefresh",
+        "command": "vscode-tmux-sidebar.toggleAutoRefresh",
         "title": "Toggle Auto Refresh",
         "category": "Tmux",
         "icon": "$(sync)"
       },
       {
-        "command": "vscode-tmux-manager.rename",
+        "command": "vscode-tmux-sidebar.rename",
         "title": "Rename Session",
         "category": "Tmux"
       },
       {
-        "command": "vscode-tmux-manager.renameWindow",
+        "command": "vscode-tmux-sidebar.renameWindow",
         "title": "Rename Window",
         "category": "Tmux"
       },
       {
-        "command": "vscode-tmux-manager.new",
+        "command": "vscode-tmux-sidebar.new",
         "title": "New Tmux Session",
         "category": "Tmux",
-        "icon": {
-          "light": "resources/light/plus.svg",
-          "dark": "resources/dark/plus.svg"
-        }
+        "icon": "$(add)"
       },
       {
-        "command": "vscode-tmux-manager.delete",
+        "command": "vscode-tmux-sidebar.delete",
         "title": "Delete Session",
         "category": "Tmux"
       },
       {
-        "command": "vscode-tmux-manager.kill-window",
+        "command": "vscode-tmux-sidebar.kill-window",
         "title": "Kill Window",
         "category": "Tmux"
       },
       {
-        "command": "vscode-tmux-manager.newWindow",
+        "command": "vscode-tmux-sidebar.newWindow",
         "title": "New Window",
         "category": "Tmux"
       },
       {
-        "command": "vscode-tmux-manager.splitPaneRight",
+        "command": "vscode-tmux-sidebar.splitPaneRight",
         "title": "Split Pane Right",
-        "category": "Tmux"
+        "category": "Tmux",
+        "icon": "$(split-horizontal)"
       },
       {
-        "command": "vscode-tmux-manager.splitPaneDown",
+        "command": "vscode-tmux-sidebar.splitPaneDown",
         "title": "Split Pane Down",
-        "category": "Tmux"
+        "category": "Tmux",
+        "icon": "$(split-vertical)"
       },
       {
-        "command": "vscode-tmux-manager.inline.newWindow",
+        "command": "vscode-tmux-sidebar.inline.newWindow",
         "title": "New Window",
         "category": "Tmux",
-        "icon": {
-          "light": "resources/light/plus.svg",
-          "dark": "resources/dark/plus.svg"
-        }
+        "icon": "$(add)"
       },
       {
-        "command": "vscode-tmux-manager.inline.splitPane",
-        "title": "Split Pane",
-        "category": "Tmux",
-        "icon": {
-          "light": "resources/light/plus.svg",
-          "dark": "resources/dark/plus.svg"
-        }
-      },
-      {
-        "command": "vscode-tmux-manager.kill-pane",
+        "command": "vscode-tmux-sidebar.kill-pane",
         "title": "Kill Pane",
         "category": "Tmux"
       }
@@ -129,75 +122,80 @@
     "menus": {
       "view/title": [
         {
-          "command": "vscode-tmux-manager.new",
-          "when": "view == vscode-tmux-manager",
+          "command": "vscode-tmux-sidebar.new",
+          "when": "view == vscode-tmux-sidebar",
           "group": "navigation"
         },
         {
-          "command": "vscode-tmux-manager.refresh",
-          "when": "view == vscode-tmux-manager",
+          "command": "vscode-tmux-sidebar.refresh",
+          "when": "view == vscode-tmux-sidebar",
           "group": "navigation"
         },
         {
-          "command": "vscode-tmux-manager.toggleAutoRefresh",
-          "when": "view == vscode-tmux-manager",
+          "command": "vscode-tmux-sidebar.toggleAutoRefresh",
+          "when": "view == vscode-tmux-sidebar",
           "group": "1_settings"
         }
       ],
       "view/item/context": [
         {
-          "command": "vscode-tmux-manager.attach",
-          "when": "view == vscode-tmux-manager && (viewItem == tmuxSession || viewItem == tmuxWindow || viewItem == tmuxPane)",
+          "command": "vscode-tmux-sidebar.attach",
+          "when": "view == vscode-tmux-sidebar && (viewItem == tmuxSession || viewItem == tmuxWindow || viewItem == tmuxPane)",
           "group": "inline"
         },
         {
-          "command": "vscode-tmux-manager.inline.newWindow",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxSession",
+          "command": "vscode-tmux-sidebar.inline.newWindow",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxSession",
           "group": "inline"
         },
         {
-          "command": "vscode-tmux-manager.inline.splitPane",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxPane",
+          "command": "vscode-tmux-sidebar.splitPaneRight",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
           "group": "inline"
         },
         {
-          "command": "vscode-tmux-manager.rename",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxSession",
+          "command": "vscode-tmux-sidebar.splitPaneDown",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
+          "group": "inline"
+        },
+        {
+          "command": "vscode-tmux-sidebar.rename",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxSession",
           "group": "1_modification"
         },
         {
-          "command": "vscode-tmux-manager.renameWindow",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxWindow",
+          "command": "vscode-tmux-sidebar.renameWindow",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxWindow",
           "group": "1_modification"
         },
         {
-          "command": "vscode-tmux-manager.newWindow",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxSession",
+          "command": "vscode-tmux-sidebar.newWindow",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxSession",
           "group": "1_modification"
         },
         {
-          "command": "vscode-tmux-manager.splitPaneRight",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxPane",
+          "command": "vscode-tmux-sidebar.splitPaneRight",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
           "group": "1_modification"
         },
         {
-          "command": "vscode-tmux-manager.splitPaneDown",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxPane",
+          "command": "vscode-tmux-sidebar.splitPaneDown",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
           "group": "1_modification"
         },
         {
-          "command": "vscode-tmux-manager.delete",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxSession",
+          "command": "vscode-tmux-sidebar.delete",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxSession",
           "group": "2_destructive"
         },
         {
-          "command": "vscode-tmux-manager.kill-window",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxWindow",
+          "command": "vscode-tmux-sidebar.kill-window",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxWindow",
           "group": "2_destructive"
         },
         {
-          "command": "vscode-tmux-manager.kill-pane",
-          "when": "view == vscode-tmux-manager && viewItem == tmuxPane",
+          "command": "vscode-tmux-sidebar.kill-pane",
+          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
           "group": "2_destructive"
         }
       ]
