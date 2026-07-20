@@ -227,7 +227,7 @@ function activate(context) {
         while (sessions.includes(String(nextId))) {
             nextId++;
         }
-        const choice = await (0, launchWizard_1.runLaunchWizard)('session', String(nextId), value => {
+        const choice = await (0, launchWizard_1.runLaunchWizard)('session', context.extensionUri, String(nextId), value => {
             if (!value.trim()) {
                 return 'Session name cannot be empty.';
             }
@@ -300,7 +300,7 @@ function activate(context) {
             return;
         }
         const sessionName = item.session.name;
-        const choice = await (0, launchWizard_1.runLaunchWizard)('window');
+        const choice = await (0, launchWizard_1.runLaunchWizard)('window', context.extensionUri);
         if (!choice) {
             return;
         }
@@ -333,7 +333,7 @@ function activate(context) {
         if (!targetPane) {
             return;
         }
-        const choice = await (0, launchWizard_1.runLaunchWizard)('split');
+        const choice = await (0, launchWizard_1.runLaunchWizard)('split', context.extensionUri);
         if (!choice || !choice.direction) {
             return;
         }
@@ -346,7 +346,7 @@ function activate(context) {
             return;
         }
         const sessionName = item.session.name;
-        const choice = await (0, launchWizard_1.runLaunchWizard)('window');
+        const choice = await (0, launchWizard_1.runLaunchWizard)('window', context.extensionUri);
         if (!choice) {
             return;
         }

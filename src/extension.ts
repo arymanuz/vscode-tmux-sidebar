@@ -211,7 +211,7 @@ export function activate(context: vscode.ExtensionContext) {
             nextId++;
         }
 
-        const choice = await runLaunchWizard('session', String(nextId), value => {
+        const choice = await runLaunchWizard('session', context.extensionUri, String(nextId), value => {
             if (!value.trim()) {
                 return 'Session name cannot be empty.';
             }
@@ -311,7 +311,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const sessionName = item.session.name;
-        const choice = await runLaunchWizard('window');
+        const choice = await runLaunchWizard('window', context.extensionUri);
         if (!choice) {
             return;
         }
@@ -347,7 +347,7 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
-        const choice = await runLaunchWizard('split');
+        const choice = await runLaunchWizard('split', context.extensionUri);
         if (!choice || !choice.direction) {
             return;
         }
@@ -364,7 +364,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const sessionName = item.session.name;
-        const choice = await runLaunchWizard('window');
+        const choice = await runLaunchWizard('window', context.extensionUri);
         if (!choice) {
             return;
         }
