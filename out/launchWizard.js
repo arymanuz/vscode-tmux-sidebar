@@ -81,19 +81,21 @@ async function installedFrom(bins) {
     }
     return found;
 }
-// A flat list plus a free-text entry built from whatever the user types, which
-// is how a model name that isn't listed still gets through.
-function pickFlat(title, entries, freeText) {
+// Every entry's label is its command, so nothing needs a secondary hint. A
+// free-text entry lets a model name that isn't listed still get through.
+function pickFlat(title, commands, freeText) {
+    const toItem = (command) => ({ label: command, command });
+    const entries = commands.map(toItem);
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = title;
         quickPick.items = entries;
         if (freeText) {
-            quickPick.placeholder = freeText.placeholder;
+            quickPick.placeholder = 'Type a model name and press Enter, or pick one below';
             quickPick.onDidChangeValue(value => {
                 const typed = value.trim();
                 quickPick.items = typed
-                    ? [...entries, { ...freeText.build(typed), alwaysShow: true }]
+                    ? [...entries, { label: `${freeText} ${typed}`, command: `${freeText} ${typed}`, alwaysShow: true }]
                     : entries;
             });
         }
@@ -113,68 +115,42 @@ function pickFlat(title, entries, freeText) {
         quickPick.show();
     });
 }
-const MODEL_HINT = 'Type a model name and press Enter, or pick one below';
 function claudeMenu(bin) {
-    return pickFlat('Claude', [
-        { label: 'Claude', description: 'default', command: bin },
-        { label: 'Claude Resume', description: 'previous conversation', command: `${bin} --resume` },
-        ...CLAUDE_MODELS.map(model => ({ label: `Claude ${model}`, description: 'model', command: `${bin} --model ${model}` }))
-    ], { placeholder: MODEL_HINT, build: value => ({ label: `Claude ${value}`, description: 'model', command: `${bin} --model ${value}` }) });
+    return pickFlat('Claude', [bin, `${bin} --resume`, ...CLAUDE_MODELS.map(m => `${bin} --model ${m}`)], bin);
 }
 function codexMenu(bin) {
-    return pickFlat('Codex', [
-        { label: 'Codex', description: 'default', command: bin },
-        { label: 'Codex Resume', description: 'previous session', command: `${bin} resume` }
-    ], { placeholder: MODEL_HINT, build: value => ({ label: `Codex ${value}`, description: 'model', command: `${bin} -m ${value}` }) });
+    return pickFlat('Codex', [bin, `${bin} resume`], `${bin} -m`);
 }
 function geminiMenu(bin) {
-    return pickFlat('Gemini', [
-        { label: 'Gemini', description: 'default', command: bin },
-        { label: 'Gemini Resume', description: 'previous session', command: `${bin} --resume` },
-        ...GEMINI_MODELS.map(model => ({ label: `Gemini ${model}`, description: 'model', command: `${bin} -m ${model}` }))
-    ], { placeholder: MODEL_HINT, build: value => ({ label: `Gemini ${value}`, description: 'model', command: `${bin} -m ${value}` }) });
+    return pickFlat('Gemini', [bin, `${bin} --resume`, ...GEMINI_MODELS.map(m => `${bin} -m ${m}`)], `${bin} -m`);
 }
 function aiderMenu(bin) {
-    return pickFlat('Aider', [
-        { label: 'Aider', description: 'default', command: bin },
-        { label: 'Aider Restore', description: 'restore chat history', command: `${bin} --restore-chat-history` }
-    ], { placeholder: MODEL_HINT, build: value => ({ label: `Aider ${value}`, description: 'model', command: `${bin} --model ${value}` }) });
+    return pickFlat('Aider', [bin, `${bin} --restore-chat-history`], `${bin} --model`);
 }
-async function shellMenu() {
+async function shellMenu(bin) {
     const shells = await installedFrom(ALT_SHELLS);
-    // The first entry reverts to the session's default shell (empty command).
-    const entries = [{ label: 'Shell', description: 'default', command: '' }];
-    for (const shell of shells) {
-        entries.push({ label: shell, command: shell });
-    }
     if (shells.length === 0) {
         vscode.window.showInformationMessage('No other shells found on this system.');
     }
-    return pickFlat('Shell', entries);
+    return pickFlat('Shell', [bin, ...shells]);
 }
-function replMenu(bin) {
-    return async () => {
-        const repls = await installedFrom(ALT_REPLS);
-        const entries = [{ label: 'Python', description: 'default', command: bin }];
-        for (const repl of repls) {
-            entries.push({ label: repl, command: repl });
-        }
-        if (repls.length === 0) {
-            vscode.window.showInformationMessage('No other REPLs found on this system.');
-        }
-        return pickFlat('REPL', entries);
-    };
+async function replMenu(bin) {
+    const repls = await installedFrom(ALT_REPLS);
+    if (repls.length === 0) {
+        vscode.window.showInformationMessage('No other REPLs found on this system.');
+    }
+    return pickFlat('REPL', [bin, ...repls]);
 }
 const PROGRAMS = [
-    { label: 'Shell', bins: ['bash'], submenu: () => shellMenu() },
-    { label: 'Python', bins: ['python3', 'python'], submenu: bin => replMenu(bin)() },
-    { label: 'Claude', bins: ['claude'], submenu: claudeMenu },
-    { label: 'Codex', bins: ['codex'], submenu: codexMenu },
-    { label: 'Gemini', bins: ['gemini', 'agy'], submenu: geminiMenu },
-    { label: 'Aider', bins: ['aider'], submenu: aiderMenu },
+    { label: 'bash', bins: ['bash'], submenu: shellMenu },
+    { label: 'python3', bins: ['python3', 'python'], submenu: replMenu },
+    { label: 'claude', bins: ['claude'], submenu: claudeMenu },
+    { label: 'codex', bins: ['codex'], submenu: codexMenu },
+    { label: 'gemini', bins: ['gemini', 'agy'], submenu: geminiMenu },
+    { label: 'aider', bins: ['aider'], submenu: aiderMenu },
     { label: 'opencode', bins: ['opencode'] },
-    { label: 'Goose', bins: ['goose'] },
-    { label: 'Crush', bins: ['crush'] },
+    { label: 'goose', bins: ['goose'] },
+    { label: 'crush', bins: ['crush'] },
     { label: 'lazygit', bins: ['lazygit'] },
     { label: 'tig', bins: ['tig'] },
     { label: 'gitui', bins: ['gitui'] }
@@ -189,16 +165,17 @@ async function resolvePrograms() {
     }
     return resolved;
 }
-// The plain form of a program, used as the row label until a submenu variant
-// replaces it. Shell's base command is empty so tmux starts the default shell.
+// The plain form of a program: its own binary as the command. bash keeps an
+// empty command so tmux starts the session's default shell.
 function basePick(resolved) {
-    return { label: resolved.program.label, command: resolved.program.label === 'Shell' ? '' : resolved.bin };
+    const command = resolved.program.label === 'bash' ? '' : resolved.bin;
+    return { label: resolved.bin, command };
 }
 /**
  * Path entry and the project folders in one window: the text box holds the
- * path, and each root is one click. A Browse button on the title bar opens the
- * native folder dialog. Typing a path that isn't a root surfaces a confirm row
- * at the top so Enter uses what was typed.
+ * path, each root is one click, and a Browse button on the title bar opens the
+ * native folder dialog. `ignoreFocusOut` keeps this window alive while that
+ * dialog has focus.
  */
 function pickWorkingDirectory(current) {
     const folders = vscode.workspace.workspaceFolders ?? [];
@@ -208,10 +185,7 @@ function pickWorkingDirectory(current) {
         path: folder.uri.fsPath,
         alwaysShow: true
     }));
-    const heading = {
-        label: 'Project folders',
-        kind: vscode.QuickPickItemKind.Separator
-    };
+    const heading = { label: 'Project folders', kind: vscode.QuickPickItemKind.Separator };
     const build = (typed) => {
         const value = typed.trim();
         const matchesRoot = folders.some(folder => folder.uri.fsPath === value);
@@ -224,15 +198,13 @@ function pickWorkingDirectory(current) {
         }
         return rows;
     };
-    const browseButton = {
-        iconPath: new vscode.ThemeIcon('folder-opened'),
-        tooltip: 'Browse…'
-    };
+    const browseButton = { iconPath: new vscode.ThemeIcon('folder-opened'), tooltip: 'Browse…' };
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = 'Working directory';
         quickPick.placeholder = 'Type a path, pick a project folder, or Browse…';
         quickPick.buttons = [browseButton];
+        quickPick.ignoreFocusOut = true;
         quickPick.value = current ?? '';
         quickPick.items = build(quickPick.value);
         quickPick.onDidChangeValue(value => {
@@ -253,7 +225,7 @@ function pickWorkingDirectory(current) {
                 openLabel: 'Use this folder'
             });
             if (chosen?.[0]) {
-                finish(chosen[0].fsPath);
+                finish(chosen[0].fsPath); // dismissing the dialog just leaves this window open
             }
         });
         quickPick.onDidAccept(() => {
@@ -270,7 +242,7 @@ function pickWorkingDirectory(current) {
     });
 }
 // Where a new terminal opens, defaulting to whatever VS Code itself is set to
-// rather than assuming the panel.
+// rather than assuming the panel. Only used to order the two create rows.
 function defaultTerminalLocation() {
     const configured = vscode.workspace.getConfiguration('terminal.integrated').get('defaultLocation');
     return configured === 'editor' ? vscode.TerminalLocation.Editor : vscode.TerminalLocation.Panel;
@@ -281,21 +253,16 @@ const DIRECTIONS = [
     { label: 'Split down', direction: 'down', icon: 'down' },
     { label: 'Split up', direction: 'up', icon: 'up' }
 ];
-// A chevron reads as "opens more" far better than a dim ellipsis did.
-const MORE_BUTTON = {
-    iconPath: new vscode.ThemeIcon('chevron-right'),
-    tooltip: 'More options'
-};
 function separator(label) {
     return { label, kind: vscode.QuickPickItemKind.Separator };
 }
 function effectivePick(draft, resolved) {
     return draft.overrides.get(resolved.program.label) ?? basePick(resolved);
 }
-// Reads top to bottom the way the task does: name, folder, what to run, then
-// the action. Every row sets alwaysShow so typing a name never filters the
+// Reads top to bottom the way the task does: folder, what to run, then the
+// action. Every real row sets alwaysShow so typing a name never filters the
 // list out of view.
-function buildRows(mode, draft, programs, typed, preferred, splitIcon, validate) {
+function buildRows(mode, draft, programs, preferred, splitIcon) {
     const rows = [];
     rows.push(separator('Folder'));
     rows.push({
@@ -312,8 +279,6 @@ function buildRows(mode, draft, programs, typed, preferred, splitIcon, validate)
             act: 'program',
             resolved,
             label: `$(${selected ? 'circle-filled' : 'circle-outline'}) ${pick.label}`,
-            description: pick.description ?? (pick.label.toLowerCase() === resolved.bin ? undefined : resolved.bin),
-            buttons: resolved.program.submenu ? [MORE_BUTTON] : undefined,
             alwaysShow: true
         });
     }
@@ -330,63 +295,49 @@ function buildRows(mode, draft, programs, typed, preferred, splitIcon, validate)
         }
         return rows;
     }
-    const error = validate?.(typed);
     rows.push(separator('Create'));
-    if (error) {
-        rows.push({ label: `$(error) ${error}`, invalid: true, alwaysShow: true });
-        return rows;
-    }
     if (mode === 'window') {
         // A window belongs to a session already attached somewhere, so there
         // is no terminal placement to choose.
         rows.push({ act: 'create', label: '$(add) Create window', alwaysShow: true });
         return rows;
     }
-    const isDefault = (location) => (location === preferred ? 'default' : undefined);
-    rows.push({
-        act: 'create',
-        location: vscode.TerminalLocation.Panel,
-        label: '$(layout-panel) Create in panel',
-        description: isDefault(vscode.TerminalLocation.Panel),
-        alwaysShow: true
-    });
-    rows.push({
-        act: 'create',
-        location: vscode.TerminalLocation.Editor,
-        label: '$(window) Create in editor area',
-        description: isDefault(vscode.TerminalLocation.Editor),
-        alwaysShow: true
-    });
+    // Order the two so the location VS Code itself defaults to comes first.
+    const panel = { act: 'create', location: vscode.TerminalLocation.Panel, label: '$(layout-panel) Create in panel', alwaysShow: true };
+    const editor = { act: 'create', location: vscode.TerminalLocation.Editor, label: '$(window) Create in editor area', alwaysShow: true };
+    rows.push(...(preferred === vscode.TerminalLocation.Editor ? [editor, panel] : [panel, editor]));
     return rows;
 }
 /**
- * One window holding every choice. The text box is the name field; folder and
- * program rows change a setting and keep the window open; the rows under Create
- * (or Split) are the actions. Selecting a program only records it and returns
- * the highlight to the default action, so Enter after typing a name always
- * creates.
+ * One window holding every choice. The text box is the name field; the folder
+ * row and program rows change a setting and keep the window open; the rows
+ * under Create (or Split) are the actions. The highlight sits on the chosen
+ * program so it is clear what will run; creating is a click on a Create row.
  */
-function showMainWindow(mode, draft, programs, extensionUri, initialValue, validate) {
+function showMainWindow(mode, draft, programs, extensionUri, suggestedName, validate) {
     const preferred = defaultTerminalLocation();
     const splitIcon = (dir) => ({
         light: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-light.svg`),
         dark: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-dark.svg`)
     });
+    // Always visible, unlike a per-row button which only appears on hover.
+    const optionsButton = {
+        iconPath: new vscode.ThemeIcon('gear'),
+        tooltip: 'Options for the selected program'
+    };
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane';
         quickPick.placeholder =
-            mode === 'session' ? 'Session name' : mode === 'window' ? 'Window name (optional)' : 'Pick where the new pane goes';
-        quickPick.value = initialValue;
-        // The row Enter should trigger: the preferred create location, the lone
-        // create row, or the first direction. Never a program row, so recording
-        // a program never steals Enter from creating.
-        const defaultRow = (rows) => rows.find(row => row.act === 'create' && (row.location === undefined || row.location === preferred)) ??
-            rows.find(row => row.act === 'create' || row.act === 'direction');
+            mode === 'session' ? `Session name (default: ${suggestedName})`
+                : mode === 'window' ? 'Window name (optional)'
+                    : 'Pick where the new pane goes';
+        quickPick.buttons = [optionsButton];
+        const selectedRow = (rows) => rows.find(row => row.act === 'program' && row.resolved?.program.label === draft.selectedProgram);
         const render = () => {
-            const rows = buildRows(mode, draft, programs, quickPick.value, preferred, splitIcon, validate);
+            const rows = buildRows(mode, draft, programs, preferred, splitIcon);
             quickPick.items = rows;
-            const active = defaultRow(rows);
+            const active = selectedRow(rows);
             if (active) {
                 quickPick.activeItems = [active];
             }
@@ -399,7 +350,8 @@ function showMainWindow(mode, draft, programs, extensionUri, initialValue, valid
             quickPick.hide();
         };
         // Run a sub-picker with this window hidden, then bring it back. QuickPick
-        // is a single overlay, so the sub-picker replaces rather than stacks.
+        // is a single overlay, so the sub-picker replaces rather than stacks —
+        // the API offers no way to layer one over another.
         const suspend = async (action) => {
             suspended = true;
             quickPick.hide();
@@ -411,23 +363,46 @@ function showMainWindow(mode, draft, programs, extensionUri, initialValue, valid
         const selectProgram = (resolved, pick) => {
             draft.selectedProgram = resolved.program.label;
             draft.command = pick.command || undefined;
-            draft.commandLabel = pick.label;
         };
-        quickPick.onDidChangeValue(() => render());
+        const openOptions = async (resolved) => {
+            if (!resolved.program.submenu) {
+                vscode.window.showInformationMessage(`${resolved.bin} has no extra options.`);
+                return;
+            }
+            await suspend(async () => {
+                const picked = await resolved.program.submenu(resolved.bin);
+                if (picked) {
+                    draft.overrides.set(resolved.program.label, picked);
+                    selectProgram(resolved, picked);
+                }
+            });
+        };
+        quickPick.onDidTriggerButton(async () => {
+            const resolved = programs.find(r => r.program.label === draft.selectedProgram);
+            if (resolved) {
+                await openOptions(resolved);
+            }
+        });
         quickPick.onDidAccept(async () => {
             const row = quickPick.activeItems[0];
-            if (!row || row.invalid || !row.act) {
+            if (!row || !row.act) {
                 return;
             }
             if (row.act === 'create') {
-                finish({ cwd: draft.cwd, command: draft.command, name: quickPick.value.trim() || undefined, location: row.location });
+                const name = mode === 'session' ? (quickPick.value.trim() || suggestedName) : (quickPick.value.trim() || undefined);
+                const error = name !== undefined ? validate?.(name) : undefined;
+                if (error) {
+                    vscode.window.showWarningMessage(error);
+                    return;
+                }
+                finish({ cwd: draft.cwd, command: draft.command, name, location: row.location });
             }
             else if (row.act === 'direction') {
                 finish({ cwd: draft.cwd, command: draft.command, direction: row.direction });
             }
             else if (row.act === 'program' && row.resolved) {
-                // Selecting a program only records it; Enter returns to the
-                // default action so it never launches on the spot.
+                // Selecting a program only records it; it does not launch and the
+                // highlight stays put so it is clear what is chosen.
                 selectProgram(row.resolved, effectivePick(draft, row.resolved));
                 render();
             }
@@ -439,19 +414,6 @@ function showMainWindow(mode, draft, programs, extensionUri, initialValue, valid
                     }
                 });
             }
-        });
-        quickPick.onDidTriggerItemButton(async (event) => {
-            const resolved = event.item.resolved;
-            if (!resolved?.program.submenu) {
-                return;
-            }
-            await suspend(async () => {
-                const picked = await resolved.program.submenu(resolved.bin);
-                if (picked) {
-                    draft.overrides.set(resolved.program.label, picked);
-                    selectProgram(resolved, picked);
-                }
-            });
         });
         quickPick.onDidHide(() => {
             if (suspended) {
@@ -466,15 +428,14 @@ function showMainWindow(mode, draft, programs, extensionUri, initialValue, valid
         quickPick.show();
     });
 }
-async function runLaunchWizard(mode, extensionUri, defaultName, validate) {
+async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
     const programs = await resolvePrograms();
     const draft = {
         cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
         command: undefined,
-        commandLabel: 'Shell',
-        selectedProgram: 'Shell',
+        selectedProgram: programs[0]?.program.label ?? 'bash',
         overrides: new Map()
     };
-    return showMainWindow(mode, draft, programs, extensionUri, defaultName ?? '', validate);
+    return showMainWindow(mode, draft, programs, extensionUri, suggestedName ?? '', validate);
 }
 //# sourceMappingURL=launchWizard.js.map
