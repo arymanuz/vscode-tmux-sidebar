@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
 import { TmuxSessionProvider, TmuxSessionTreeItem, TmuxWindowTreeItem, TmuxPaneTreeItem } from './treeProvider';
-import { TmuxService, TMUX_BIN } from './tmuxService';
+import { TmuxService, TMUX_BIN, SplitDirection } from './tmuxService';
+import { runLaunchWizard } from './launchWizard';
 
 // Create a terminal that attaches to a tmux/psmux session, making the
 // multiplexer the terminal's main process so that exiting it closes the tab
 // (instead of dropping back into a shell).
-function createAttachTerminal(context: vscode.ExtensionContext, terminalName: string, sessionName: string): vscode.Terminal {
+function createAttachTerminal(
+    context: vscode.ExtensionContext,
+    terminalName: string,
+    sessionName: string,
+    location?: vscode.TerminalLocation
+): vscode.Terminal {
     const iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.svg');
 
     if (process.platform === 'win32') {
@@ -14,6 +20,7 @@ function createAttachTerminal(context: vscode.ExtensionContext, terminalName: st
         return vscode.window.createTerminal({
             name: terminalName,
             iconPath,
+            location,
             shellPath: TMUX_BIN,
             shellArgs: ['attach', '-t', sessionName]
         });
@@ -30,6 +37,7 @@ function createAttachTerminal(context: vscode.ExtensionContext, terminalName: st
     return vscode.window.createTerminal({
         name: terminalName,
         iconPath,
+        location,
         shellPath: process.env.SHELL || '/bin/bash',
         shellArgs: ['-lc', `exec ${TMUX_BIN} attach -t "${sessionName}"`]
     });
@@ -203,25 +211,28 @@ export function activate(context: vscode.ExtensionContext) {
             nextId++;
         }
 
-        const newName = await vscode.window.showInputBox({
-            prompt: 'Enter new session name',
-            value: String(nextId),
-            validateInput: value => {
-                if (!value) return 'Session name cannot be empty.';
-                if (sessions.includes(value)) return `Session name "${value}" already exists.`;
-                return null;
-            }
-        });
+        const choice = await runLaunchWizard('session', String(nextId));
+        if (!choice) {
+            return;
+        }
 
-        if (newName) {
-            try {
-                await tmuxService.newSession(newName);
-                tmuxSessionProvider.refresh();
-                const terminal = createAttachTerminal(context, `tmux - ${newName}`, newName);
-                terminal.show();
-            } catch (error) {
-                // Error is already shown by the service
-            }
+        const newName = choice.name;
+        if (!newName) {
+            vscode.window.showErrorMessage('Session name cannot be empty.');
+            return;
+        }
+        if (sessions.includes(newName)) {
+            vscode.window.showErrorMessage(`Session name "${newName}" already exists.`);
+            return;
+        }
+
+        try {
+            await tmuxService.newSession(newName, choice);
+            tmuxSessionProvider.refresh();
+            const terminal = createAttachTerminal(context, `tmux - ${newName}`, newName, choice.location);
+            terminal.show();
+        } catch (error) {
+            // Error is already shown by the service
         }
     });
 
@@ -301,65 +312,62 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const sessionName = item.session.name;
-        const windowName = await vscode.window.showInputBox({
-            prompt: `Enter name for new window in session "${sessionName}"`,
-            placeHolder: 'Leave empty for default name',
-            validateInput: value => {
-                // Allow empty value for default name
-                if (value && value.trim() === '') {
-                    return null; // Empty is OK, will use default
-                }
-                return null; // Any non-empty value is OK
-            }
-        });
-
-        // User cancelled the input
-        if (windowName === undefined) {
+        const choice = await runLaunchWizard('window');
+        if (!choice) {
             return;
         }
 
         try {
-            const finalWindowName = windowName.trim() || undefined; // Use undefined for empty string
-            await tmuxService.newWindow(sessionName, finalWindowName);
+            await tmuxService.newWindow(sessionName, choice.name, choice);
             tmuxSessionProvider.refresh();
         } catch (error) {
             // Error is already shown by the service
         }
     });
 
-    const splitPaneRightCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.splitPaneRight', async (item: TmuxPaneTreeItem) => {
+    // Resolve the tmux target for a pane tree item, reporting why if it can't.
+    const targetOf = (item: TmuxPaneTreeItem): string | undefined => {
         if (!item || !item.pane) {
             vscode.window.showErrorMessage('Invalid pane data for split operation');
-            return;
+            return undefined;
         }
-        
         const { sessionName, windowIndex, index } = item.pane;
         if (!sessionName || !windowIndex || !index) {
             vscode.window.showErrorMessage('Missing pane information for split');
+            return undefined;
+        }
+        return `${sessionName}:${windowIndex}.${index}`;
+    };
+
+    // The inline button: asks for working directory, what to run, and which
+    // way to split. The direction is the last step rather than four separate
+    // buttons on the tree item.
+    const splitPaneCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.splitPane', async (item: TmuxPaneTreeItem) => {
+        const targetPane = targetOf(item);
+        if (!targetPane) {
             return;
         }
-        
-        const targetPane = `${sessionName}:${windowIndex}.${index}`;
-        await tmuxService.splitPane(targetPane, 'h');
+
+        const choice = await runLaunchWizard('split');
+        if (!choice || !choice.direction) {
+            return;
+        }
+
+        await tmuxService.splitPane(targetPane, choice.direction, choice);
         tmuxSessionProvider.refresh();
     });
 
-    const splitPaneDownCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.splitPaneDown', async (item: TmuxPaneTreeItem) => {
-        if (!item || !item.pane) {
-            vscode.window.showErrorMessage('Invalid pane data for split operation');
-            return;
-        }
-        
-        const { sessionName, windowIndex, index } = item.pane;
-        if (!sessionName || !windowIndex || !index) {
-            vscode.window.showErrorMessage('Missing pane information for split');
-            return;
-        }
-        
-        const targetPane = `${sessionName}:${windowIndex}.${index}`;
-        await tmuxService.splitPane(targetPane, 'v');
-        tmuxSessionProvider.refresh();
-    });
+    // Context-menu shortcuts that skip the wizard entirely.
+    const directSplitCommands = (['right', 'left', 'down', 'up'] as SplitDirection[]).map(direction =>
+        vscode.commands.registerCommand(`vscode-tmux-sidebar.split.${direction}`, async (item: TmuxPaneTreeItem) => {
+            const targetPane = targetOf(item);
+            if (!targetPane) {
+                return;
+            }
+            await tmuxService.splitPane(targetPane, direction);
+            tmuxSessionProvider.refresh();
+        })
+    );
 
     const inlineNewWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.inline.newWindow', async (item: TmuxSessionTreeItem) => {
         if (!item || !item.session || !item.session.name) {
@@ -368,26 +376,13 @@ export function activate(context: vscode.ExtensionContext) {
         }
         
         const sessionName = item.session.name;
-        const windowName = await vscode.window.showInputBox({
-            prompt: `Enter name for new window in session "${sessionName}"`,
-            placeHolder: 'Leave empty for default name',
-            validateInput: value => {
-                // Allow empty value for default name
-                if (value && value.trim() === '') {
-                    return null; // Empty is OK, will use default
-                }
-                return null; // Any non-empty value is OK
-            }
-        });
-
-        // User cancelled the input
-        if (windowName === undefined) {
+        const choice = await runLaunchWizard('window');
+        if (!choice) {
             return;
         }
 
         try {
-            const finalWindowName = windowName.trim() || undefined; // Use undefined for empty string
-            await tmuxService.newWindow(sessionName, finalWindowName);
+            await tmuxService.newWindow(sessionName, choice.name, choice);
             tmuxSessionProvider.refresh();
         } catch (error) {
             // Error is already shown by the service
@@ -405,8 +400,8 @@ export function activate(context: vscode.ExtensionContext) {
         killWindowCommand,
         killPaneCommand,
         newWindowCommand,
-        splitPaneRightCommand,
-        splitPaneDownCommand,
+        splitPaneCommand,
+        ...directSplitCommands,
         inlineNewWindowCommand,
         tmuxSessionProvider // Add provider to dispose auto-refresh on deactivation
     );

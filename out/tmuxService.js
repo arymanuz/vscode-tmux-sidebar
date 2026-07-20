@@ -44,6 +44,30 @@ const exec = util.promisify(cp.exec);
 // is 'linux' and we correctly use tmux there, even if the UI is on Windows.
 // Only a genuinely local Windows host reports 'win32' and uses psmux.
 exports.TMUX_BIN = process.platform === 'win32' ? 'psmux' : 'tmux';
+const SPLIT_FLAGS = {
+    right: '-h',
+    left: '-h -b',
+    down: '-v',
+    up: '-v -b'
+};
+// Commands are run through a shell, so anything interpolated into them has to
+// be quoted. Single quotes disable every expansion; an embedded single quote is
+// closed, escaped and reopened.
+function shellQuote(value) {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+function launchArgs(options) {
+    if (!options?.cwd) {
+        return '';
+    }
+    return ` -c ${shellQuote(options.cwd)}`;
+}
+function launchCommand(options) {
+    if (!options?.command) {
+        return '';
+    }
+    return ` ${shellQuote(options.command)}`;
+}
 class TmuxService {
     constructor() {
         this.cache = null;
@@ -366,12 +390,12 @@ class TmuxService {
             throw error;
         }
     }
-    async newSession(sessionName) {
+    async newSession(sessionName, options) {
         if (!await this.checkTmuxInstallation()) {
             throw new Error(`${exports.TMUX_BIN} is not installed`);
         }
         try {
-            await exec(`${exports.TMUX_BIN} new-session -d -s "${sessionName}"`);
+            await exec(`${exports.TMUX_BIN} new-session -d -s ${shellQuote(sessionName)}${launchArgs(options)}${launchCommand(options)}`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Created new session "${sessionName}"`);
         }
@@ -472,15 +496,16 @@ class TmuxService {
             console.warn(`Failed to select pane ${paneIndex}:`, error);
         }
     }
-    async newWindow(sessionName, windowName) {
+    async newWindow(sessionName, windowName, options) {
         if (!await this.checkTmuxInstallation()) {
             return;
         }
         try {
-            let command = `${exports.TMUX_BIN} new-window -t "${sessionName}"`;
+            let command = `${exports.TMUX_BIN} new-window -t ${shellQuote(sessionName)}`;
             if (windowName) {
-                command += ` -n "${windowName}"`;
+                command += ` -n ${shellQuote(windowName)}`;
             }
+            command += `${launchArgs(options)}${launchCommand(options)}`;
             await exec(command);
             this.clearCache(); // Clear cache after modification
             const message = windowName
@@ -499,15 +524,14 @@ class TmuxService {
             throw error;
         }
     }
-    async splitPane(targetPane, direction) {
+    async splitPane(targetPane, direction, options) {
         if (!await this.checkTmuxInstallation()) {
             return;
         }
         try {
-            await exec(`${exports.TMUX_BIN} split-window -t "${targetPane}" -${direction}`);
+            await exec(`${exports.TMUX_BIN} split-window -t ${shellQuote(targetPane)} ${SPLIT_FLAGS[direction]}${launchArgs(options)}${launchCommand(options)}`);
             this.clearCache(); // Clear cache after modification
-            const directionText = direction === 'h' ? 'horizontally' : 'vertically';
-            vscode.window.showInformationMessage(`Split pane ${directionText}`);
+            vscode.window.showInformationMessage(`Split pane ${direction}`);
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);

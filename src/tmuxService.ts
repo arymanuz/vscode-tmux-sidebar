@@ -12,6 +12,47 @@ const exec = util.promisify(cp.exec);
 // Only a genuinely local Windows host reports 'win32' and uses psmux.
 export const TMUX_BIN = process.platform === 'win32' ? 'psmux' : 'tmux';
 
+// What a new session, window or pane should start with. Both fields map onto
+// flags that new-session, new-window and split-window all share: `-c` sets the
+// working directory and a trailing shell-command replaces the default shell.
+export interface LaunchOptions {
+    cwd?: string;
+    command?: string;
+}
+
+// tmux splits in two directions only: -h opens to the right and -v below.
+// -b inverts that, creating the pane to the left of or above the target, which
+// is how the remaining two directions are expressed.
+export type SplitDirection = 'right' | 'left' | 'down' | 'up';
+
+const SPLIT_FLAGS: Record<SplitDirection, string> = {
+    right: '-h',
+    left: '-h -b',
+    down: '-v',
+    up: '-v -b'
+};
+
+// Commands are run through a shell, so anything interpolated into them has to
+// be quoted. Single quotes disable every expansion; an embedded single quote is
+// closed, escaped and reopened.
+function shellQuote(value: string): string {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function launchArgs(options?: LaunchOptions): string {
+    if (!options?.cwd) {
+        return '';
+    }
+    return ` -c ${shellQuote(options.cwd)}`;
+}
+
+function launchCommand(options?: LaunchOptions): string {
+    if (!options?.command) {
+        return '';
+    }
+    return ` ${shellQuote(options.command)}`;
+}
+
 interface CacheEntry {
     data: TmuxSession[];
     timestamp: number;
@@ -362,13 +403,13 @@ export class TmuxService {
         }
     }
 
-    public async newSession(sessionName: string): Promise<void> {
+    public async newSession(sessionName: string, options?: LaunchOptions): Promise<void> {
         if (!await this.checkTmuxInstallation()) {
             throw new Error(`${TMUX_BIN} is not installed`);
         }
-        
+
         try {
-            await exec(`${TMUX_BIN} new-session -d -s "${sessionName}"`);
+            await exec(`${TMUX_BIN} new-session -d -s ${shellQuote(sessionName)}${launchArgs(options)}${launchCommand(options)}`);
             this.clearCache(); // Clear cache after modification
             vscode.window.showInformationMessage(`Created new session "${sessionName}"`);
         } catch (error) {
@@ -470,16 +511,17 @@ export class TmuxService {
         }
     }
 
-    public async newWindow(sessionName: string, windowName?: string): Promise<void> {
+    public async newWindow(sessionName: string, windowName?: string, options?: LaunchOptions): Promise<void> {
         if (!await this.checkTmuxInstallation()) {
             return;
         }
-        
+
         try {
-            let command = `${TMUX_BIN} new-window -t "${sessionName}"`;
+            let command = `${TMUX_BIN} new-window -t ${shellQuote(sessionName)}`;
             if (windowName) {
-                command += ` -n "${windowName}"`;
+                command += ` -n ${shellQuote(windowName)}`;
             }
+            command += `${launchArgs(options)}${launchCommand(options)}`;
             await exec(command);
             this.clearCache(); // Clear cache after modification
             
@@ -498,16 +540,15 @@ export class TmuxService {
         }
     }
 
-    public async splitPane(targetPane: string, direction: 'h' | 'v'): Promise<void> {
+    public async splitPane(targetPane: string, direction: SplitDirection, options?: LaunchOptions): Promise<void> {
         if (!await this.checkTmuxInstallation()) {
             return;
         }
-        
+
         try {
-            await exec(`${TMUX_BIN} split-window -t "${targetPane}" -${direction}`);
+            await exec(`${TMUX_BIN} split-window -t ${shellQuote(targetPane)} ${SPLIT_FLAGS[direction]}${launchArgs(options)}${launchCommand(options)}`);
             this.clearCache(); // Clear cache after modification
-            const directionText = direction === 'h' ? 'horizontally' : 'vertically';
-            vscode.window.showInformationMessage(`Split pane ${directionText}`);
+            vscode.window.showInformationMessage(`Split pane ${direction}`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('pane not found')) {
