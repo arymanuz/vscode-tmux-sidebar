@@ -6,15 +6,17 @@
        uses currentColor), the gallery tile needs its own background and explicit
        colours because it is shown on both light and dark marketplace pages.
 
-       The tile itself is the terminal window, so the artwork fills the whole
-       square the way most gallery icons do; drawing a separate window outline
-       inside the tile left a nested frame and a small glyph. Proportions match
-       the activity bar icon: the status bar takes the bottom quarter. -->
+       The window is drawn as a real outline rather than relying on the tile edge
+       to imply it: the tile is dark, so on a dark page its edge disappears and
+       only the inner dividers would remain visible. The outline is inset just
+       8px so the artwork still fills the square. Proportions match the activity
+       bar icon: the status bar takes the bottom quarter of the window. -->
   <rect width="128" height="128" rx="24" fill="#21262D"/>
-  <g stroke="#E6EDF3" stroke-width="8" stroke-linecap="butt">
-    <path d="M64 0 V96"/>
-    <path d="M64 48 H128"/>
-    <path d="M0 96 H128"/>
+  <g fill="none" stroke="#E6EDF3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="8" y="8" width="112" height="112" rx="16"/>
+    <path d="M64 8 V92"/>
+    <path d="M64 50 H120"/>
+    <path d="M8 92 H120"/>
   </g>
-  <rect x="18" y="105" width="30" height="10" rx="5" fill="#8DBF3F"/>
+  <rect x="20" y="101" width="28" height="10" rx="5" fill="#8DBF3F"/>
 </svg>
