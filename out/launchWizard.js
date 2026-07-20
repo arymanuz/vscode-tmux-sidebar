@@ -92,11 +92,7 @@ function pickFlat(title, entries, freeText) {
             quickPick.placeholder = 'Pick one, or type a value and press Enter';
             quickPick.onDidChangeValue(value => {
                 const typed = value.trim();
-                if (!typed) {
-                    quickPick.items = entries;
-                    return;
-                }
-                quickPick.items = [...entries, { ...freeText(typed) }];
+                quickPick.items = typed ? [...entries, { ...freeText(typed), alwaysShow: true }] : entries;
             });
         }
         let settled = false;
@@ -117,21 +113,21 @@ function pickFlat(title, entries, freeText) {
 }
 function claudeMenu(bin) {
     return pickFlat('Claude', [
-        { label: 'Resume…', command: `${bin} --resume`, detail: 'Pick a previous conversation' },
-        ...CLAUDE_MODELS.map(model => ({ label: model, command: `${bin} --model ${model}`, detail: `Latest ${model} model` }))
+        { label: 'Resume…', description: 'previous conversation', command: `${bin} --resume` },
+        ...CLAUDE_MODELS.map(model => ({ label: model, command: `${bin} --model ${model}` }))
     ], value => ({ label: value, command: `${bin} --model ${value}` }));
 }
 function codexMenu(bin) {
-    return pickFlat('Codex', [{ label: 'Resume…', command: `${bin} resume`, detail: 'Pick a previous session' }], value => ({ label: value, command: `${bin} -m ${value}` }));
+    return pickFlat('Codex', [{ label: 'Resume…', description: 'previous session', command: `${bin} resume` }], value => ({ label: value, command: `${bin} -m ${value}` }));
 }
 function geminiMenu(bin) {
     return pickFlat('Gemini', [
-        { label: 'Resume…', command: `${bin} --resume`, detail: 'Load a previous session' },
+        { label: 'Resume…', description: 'previous session', command: `${bin} --resume` },
         ...GEMINI_MODELS.map(model => ({ label: model, command: `${bin} -m ${model}` }))
     ], value => ({ label: value, command: `${bin} -m ${value}` }));
 }
 function aiderMenu(bin) {
-    return pickFlat('Aider', [{ label: 'Restore chat history', command: `${bin} --restore-chat-history`, detail: 'Continue the last conversation' }], value => ({ label: value, command: `${bin} --model ${value}` }));
+    return pickFlat('Aider', [{ label: 'Restore chat history', command: `${bin} --restore-chat-history` }], value => ({ label: value, command: `${bin} --model ${value}` }));
 }
 async function shellMenu() {
     const shells = await installedFrom(ALT_SHELLS);
@@ -150,7 +146,7 @@ async function replMenu() {
     return pickFlat('REPL', repls.map(repl => ({ label: repl, command: repl })));
 }
 const PROGRAMS = [
-    { label: 'Shell', bins: ['bash'], detail: 'Default shell', submenu: shellMenu },
+    { label: 'Shell', bins: ['bash'], submenu: shellMenu },
     { label: 'Python', bins: ['python3', 'python'], submenu: replMenu },
     { label: 'Claude', bins: ['claude'], submenu: claudeMenu },
     { label: 'Codex', bins: ['codex'], submenu: codexMenu },
@@ -164,7 +160,9 @@ const PROGRAMS = [
     { label: 'gitui', bins: ['gitui'] }
 ];
 // Selecting an entry runs it with no arguments; the button on the right opens
-// that entry's options instead, so the common case stays a single click.
+// that entry's options instead, so the common case stays a single click. Every
+// row is one line: the resolved binary goes in `description`, which renders
+// beside the label rather than under it.
 async function pickProgram() {
     const moreButton = {
         iconPath: new vscode.ThemeIcon('ellipsis'),
@@ -178,7 +176,6 @@ async function pickProgram() {
         }
         items.push({
             label: program.label,
-            detail: program.detail,
             description: program.label.toLowerCase() === bin ? undefined : bin,
             buttons: program.submenu ? [moreButton] : undefined,
             program,
@@ -227,12 +224,11 @@ async function pickWorkingDirectory(current) {
     const items = [
         ...folders.map((folder, index) => ({
             label: folder.name,
-            description: folder.uri.fsPath,
-            detail: index === 0 ? 'Project folder (default)' : undefined,
+            description: index === 0 ? `${folder.uri.fsPath} — default` : folder.uri.fsPath,
             path: folder.uri.fsPath
         })),
-        { label: 'Browse…', detail: 'Pick a folder', action: 'browse' },
-        { label: 'Enter path…', detail: 'Type a path', action: 'enter' }
+        { label: 'Browse…', action: 'browse' },
+        { label: 'Enter path…', action: 'enter' }
     ];
     const picked = await vscode.window.showQuickPick(items, { title: 'Working directory' });
     if (!picked) {
@@ -258,99 +254,84 @@ async function pickWorkingDirectory(current) {
 }
 async function pickLocation() {
     const picked = await vscode.window.showQuickPick([
-        { label: 'Panel', detail: 'Bottom panel (default)', location: vscode.TerminalLocation.Panel },
-        { label: 'Editor area', detail: 'As an editor tab', location: vscode.TerminalLocation.Editor }
+        { label: 'Panel', description: 'bottom panel — default', location: vscode.TerminalLocation.Panel },
+        { label: 'Editor area', description: 'as an editor tab', location: vscode.TerminalLocation.Editor }
     ], { title: 'Open the terminal in' });
     return picked?.location;
 }
-const FOLDER_BUTTON = { iconPath: new vscode.ThemeIcon('folder-opened'), tooltip: 'Working directory' };
-const RUN_BUTTON = { iconPath: new vscode.ThemeIcon('play'), tooltip: 'What to run' };
-const LOCATION_BUTTON = { iconPath: new vscode.ThemeIcon('layout'), tooltip: 'Where to open the terminal' };
-function summarise(draft, mode) {
-    const folder = draft.cwd ? path.basename(draft.cwd) : 'default';
-    const parts = [`Folder: ${folder}`, `Run: ${draft.commandLabel}`];
-    if (mode !== 'split') {
-        parts.push(`Terminal: ${draft.location === vscode.TerminalLocation.Editor ? 'Editor area' : 'Panel'}`);
-    }
-    return `${parts.join('   ·   ')}   ·   change with the buttons above`;
-}
-// Runs the sub-picker behind a title button. Returns false when the user backed
-// out of it, so the caller knows nothing changed.
-async function applyButton(button, draft, mode) {
-    if (button === FOLDER_BUTTON) {
-        const cwd = await pickWorkingDirectory(draft.cwd);
-        if (cwd) {
-            draft.cwd = cwd;
-        }
-        return;
-    }
-    if (button === RUN_BUTTON) {
-        const picked = await pickProgram();
-        if (picked) {
-            draft.command = picked.command || undefined;
-            draft.commandLabel = picked.label;
-        }
-        return;
-    }
-    if (button === LOCATION_BUTTON && mode !== 'split') {
-        const location = await pickLocation();
-        if (location !== undefined) {
-            draft.location = location;
-        }
-    }
-}
-function showNameInput(mode, value, draft, validate) {
-    return new Promise(resolve => {
-        const input = vscode.window.createInputBox();
-        input.title = mode === 'session' ? 'New session' : 'New window';
-        input.value = value;
-        input.prompt = summarise(draft, mode);
-        input.placeholder = mode === 'window' ? 'Window name (optional)' : 'Session name';
-        input.buttons = mode === 'session' ? [FOLDER_BUTTON, RUN_BUTTON, LOCATION_BUTTON] : [FOLDER_BUTTON, RUN_BUTTON];
-        input.validationMessage = validate?.(value);
-        let settled = false;
-        const finish = (result) => {
-            settled = true;
-            resolve(result);
-            input.hide();
-        };
-        input.onDidChangeValue(current => {
-            input.validationMessage = validate?.(current);
-        });
-        input.onDidAccept(() => {
-            // Refuse the name here rather than after the window closes, so the
-            // problem is shown next to the field being corrected.
-            if (validate?.(input.value)) {
-                return;
-            }
-            finish({ type: 'accept', value: input.value });
-        });
-        input.onDidTriggerButton(button => finish({ type: 'button', value: input.value, button }));
-        input.onDidHide(() => {
-            if (!settled) {
-                resolve({ type: 'cancel' });
-            }
-            input.dispose();
-        });
-        input.show();
-    });
-}
 const DIRECTIONS = [
-    { label: 'Right', icon: 'arrow-right', direction: 'right' },
-    { label: 'Left', icon: 'arrow-left', direction: 'left' },
-    { label: 'Down', icon: 'arrow-down', direction: 'down' },
-    { label: 'Up', icon: 'arrow-up', direction: 'up' }
+    { label: 'Split Right', icon: 'arrow-right', direction: 'right' },
+    { label: 'Split Left', icon: 'arrow-left', direction: 'left' },
+    { label: 'Split Down', icon: 'arrow-down', direction: 'down' },
+    { label: 'Split Up', icon: 'arrow-up', direction: 'up' }
 ];
-function showDirectionPick(draft) {
+function locationLabel(location) {
+    return location === vscode.TerminalLocation.Editor ? 'Editor area' : 'Panel';
+}
+// Every row sets alwaysShow so typing a name never filters the settings out of
+// view — the text box acts as the name field while the settings stay listed.
+function buildRows(mode, draft, typed, validate) {
+    const rows = [];
+    if (mode === 'split') {
+        for (const entry of DIRECTIONS) {
+            rows.push({
+                action: 'direction',
+                direction: entry.direction,
+                label: `$(${entry.icon}) ${entry.label}`,
+                alwaysShow: true
+            });
+        }
+    }
+    else {
+        const name = typed.trim();
+        const error = validate?.(typed);
+        rows.push({
+            action: 'create',
+            label: error
+                ? `$(error) ${error}`
+                : name
+                    ? `$(add) Create "${name}"`
+                    : `$(add) Create`,
+            invalid: Boolean(error),
+            alwaysShow: true
+        });
+    }
+    rows.push({
+        action: 'folder',
+        label: '$(folder) Folder',
+        description: draft.cwd ? path.basename(draft.cwd) : 'default',
+        alwaysShow: true
+    });
+    rows.push({
+        action: 'run',
+        label: '$(play) Run',
+        description: draft.commandLabel,
+        alwaysShow: true
+    });
+    if (mode !== 'split') {
+        rows.push({
+            action: 'location',
+            label: '$(window) Terminal',
+            description: locationLabel(draft.location),
+            alwaysShow: true
+        });
+    }
+    return rows;
+}
+function showMainWindow(mode, draft, value, validate) {
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick();
-        quickPick.title = 'Split pane';
-        quickPick.placeholder = summarise(draft, 'split');
-        quickPick.items = DIRECTIONS.map(entry => ({
-            label: `$(${entry.icon}) ${entry.label}`,
-            direction: entry.direction
-        }));
-        quickPick.buttons = [FOLDER_BUTTON, RUN_BUTTON];
+        quickPick.title = mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane';
+        quickPick.placeholder =
+            mode === 'session' ? 'Session name' : mode === 'window' ? 'Window name (optional)' : 'Pick a direction';
+        quickPick.value = value;
+        quickPick.items = buildRows(mode, draft, value, validate);
+        // Keep the primary action selected so Enter creates straight away.
+        quickPick.activeItems = [quickPick.items[0]];
+        quickPick.onDidChangeValue(current => {
+            quickPick.items = buildRows(mode, draft, current, validate);
+            quickPick.activeItems = [quickPick.items[0]];
+        });
         let settled = false;
         const finish = (result) => {
             settled = true;
@@ -358,10 +339,20 @@ function showDirectionPick(draft) {
             quickPick.hide();
         };
         quickPick.onDidAccept(() => {
-            const item = quickPick.selectedItems[0];
-            finish(item ? { type: 'accept', direction: item.direction } : { type: 'cancel' });
+            const row = quickPick.selectedItems[0];
+            if (!row || row.invalid) {
+                return; // the name is rejected — leave the window open on it
+            }
+            if (row.action === 'create') {
+                finish({ type: 'create', value: quickPick.value });
+            }
+            else if (row.action === 'direction' && row.direction) {
+                finish({ type: 'direction', direction: row.direction });
+            }
+            else {
+                finish({ type: 'edit', action: row.action, value: quickPick.value });
+            }
         });
-        quickPick.onDidTriggerButton(button => finish({ type: 'button', button }));
         quickPick.onDidHide(() => {
             if (!settled) {
                 resolve({ type: 'cancel' });
@@ -371,12 +362,35 @@ function showDirectionPick(draft) {
         quickPick.show();
     });
 }
+async function applyEdit(action, draft) {
+    if (action === 'folder') {
+        const cwd = await pickWorkingDirectory(draft.cwd);
+        if (cwd) {
+            draft.cwd = cwd;
+        }
+        return;
+    }
+    if (action === 'run') {
+        const picked = await pickProgram();
+        if (picked) {
+            draft.command = picked.command || undefined;
+            draft.commandLabel = picked.label;
+        }
+        return;
+    }
+    if (action === 'location') {
+        const location = await pickLocation();
+        if (location !== undefined) {
+            draft.location = location;
+        }
+    }
+}
 /**
- * One window, not a sequence of steps. Sessions and windows show a name field
- * — typing a name and pressing Enter is the whole interaction — while a split
- * shows the four directions. Working directory, what to run, and where to open
- * the terminal all have defaults, are visible in the summary line, and change
- * through the title buttons only if the user wants them to.
+ * One window listing every choice at once. The text box doubles as the name
+ * field, and because each row is marked alwaysShow, typing never hides the
+ * settings. Pressing Enter runs the top row, so naming a session and creating
+ * it stays two keystrokes; the remaining rows only need touching to change a
+ * default, and re-open this window with the typed name intact.
  */
 async function runLaunchWizard(mode, defaultName, validate) {
     const draft = {
@@ -385,29 +399,20 @@ async function runLaunchWizard(mode, defaultName, validate) {
         commandLabel: 'Shell',
         location: vscode.TerminalLocation.Panel
     };
-    if (mode === 'split') {
-        for (;;) {
-            const result = await showDirectionPick(draft);
-            if (result.type === 'cancel') {
-                return undefined;
-            }
-            if (result.type === 'accept') {
-                return { ...draft, direction: result.direction };
-            }
-            await applyButton(result.button, draft, mode);
-        }
-    }
     let value = defaultName ?? '';
     for (;;) {
-        const result = await showNameInput(mode, value, draft, validate);
+        const result = await showMainWindow(mode, draft, value, validate);
         if (result.type === 'cancel') {
             return undefined;
         }
-        value = result.value;
-        if (result.type === 'accept') {
-            return { ...draft, name: value.trim() || undefined };
+        if (result.type === 'direction') {
+            return { ...draft, direction: result.direction };
         }
-        await applyButton(result.button, draft, mode);
+        if (result.type === 'create') {
+            return { ...draft, name: result.value.trim() || undefined };
+        }
+        value = result.value;
+        await applyEdit(result.action, draft);
     }
 }
 //# sourceMappingURL=launchWizard.js.map
