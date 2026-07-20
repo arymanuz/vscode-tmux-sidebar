@@ -118,7 +118,11 @@ function pickFlat(title: string, commands: string[], freeText?: string): Promise
 }
 
 function claudeMenu(bin: string): Promise<Picked | undefined> {
-    return pickFlat('Claude', [bin, `${bin} --resume`, ...CLAUDE_MODELS.map(m => `${bin} --model ${m}`)], bin);
+    return pickFlat(
+        'Claude',
+        [bin, `${bin} --resume`, `${bin} --resume --fork-session`, ...CLAUDE_MODELS.map(m => `${bin} --model ${m}`)],
+        bin
+    );
 }
 
 function codexMenu(bin: string): Promise<Picked | undefined> {
@@ -289,21 +293,13 @@ const DIRECTIONS: { label: string; direction: SplitDirection; icon: string }[] =
     { label: 'Split up', direction: 'up', icon: 'up' }
 ];
 
-type RowAction = 'create' | 'direction' | 'folder' | 'program' | 'options';
+type RowAction = 'create' | 'direction' | 'folder' | 'program';
 
 interface Row extends vscode.QuickPickItem {
     act?: RowAction;
     location?: vscode.TerminalLocation;
     direction?: SplitDirection;
     resolved?: ResolvedProgram;
-}
-
-// Programs are tinted green so they stand out as the pickable list; a colour
-// can only travel on iconPath, not on a `$(icon)` inside the label.
-const GREEN = new vscode.ThemeColor('terminal.ansiGreen');
-
-function programIcon(selected: boolean): vscode.ThemeIcon {
-    return new vscode.ThemeIcon(selected ? 'circle-filled' : 'circle-outline', GREEN);
 }
 
 function effectivePick(draft: Draft, resolved: ResolvedProgram): Picked {
@@ -319,7 +315,8 @@ function buildRows(
     draft: Draft,
     programs: ResolvedProgram[],
     preferred: vscode.TerminalLocation,
-    splitIcon: (dir: string) => vscode.IconPath
+    splitIcon: (dir: string) => vscode.IconPath,
+    dotIcon: (selected: boolean) => vscode.IconPath
 ): Row[] {
     const rows: Row[] = [];
 
@@ -333,24 +330,15 @@ function buildRows(
 
     for (const resolved of programs) {
         const pick = effectivePick(draft, resolved);
+        const selected = resolved.program.label === draft.selectedProgram;
         rows.push({
             act: 'program',
             resolved,
-            iconPath: programIcon(resolved.program.label === draft.selectedProgram),
+            iconPath: dotIcon(selected),
             label: pick.label,
-            alwaysShow: true
-        });
-    }
-
-    // One always-visible, easy-to-hit affordance for the highlighted program's
-    // options — shown only when that program actually has any.
-    const selected = programs.find(r => r.program.label === draft.selectedProgram);
-    if (selected?.program.submenu) {
-        rows.push({
-            act: 'options',
-            iconPath: new vscode.ThemeIcon('chevron-right'),
-            label: 'more options',
-            description: selected.bin,
+            // Programs with variants open their list on click, so signal it —
+            // per-row buttons only show on hover, which is easy to miss.
+            description: resolved.program.submenu ? '›' : undefined,
             alwaysShow: true
         });
     }
@@ -412,10 +400,12 @@ function showMainWindow(
     validate?: NameValidator
 ): Promise<LaunchChoice | undefined> {
     const preferred = defaultTerminalLocation();
-    const splitIcon = (dir: string): vscode.IconPath => ({
-        light: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-light.svg`),
-        dark: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-dark.svg`)
+    const themedIcon = (dir: string, name: string): vscode.IconPath => ({
+        light: vscode.Uri.joinPath(extensionUri, 'resources', dir, `${name}-light.svg`),
+        dark: vscode.Uri.joinPath(extensionUri, 'resources', dir, `${name}-dark.svg`)
     });
+    const splitIcon = (d: string): vscode.IconPath => themedIcon('split', d);
+    const dotIcon = (selected: boolean): vscode.IconPath => themedIcon('dot', selected ? 'filled' : 'outline');
 
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick<Row>();
@@ -429,7 +419,7 @@ function showMainWindow(
             rows.find(row => row.act === 'program' && row.resolved?.program.label === draft.selectedProgram);
 
         const render = () => {
-            const rows = buildRows(mode, draft, programs, preferred, splitIcon);
+            const rows = buildRows(mode, draft, programs, preferred, splitIcon, dotIcon);
             quickPick.items = rows;
             const active = selectedRow(rows);
             if (active) {
@@ -481,12 +471,7 @@ function showMainWindow(
             if (!row || !row.act) {
                 return;
             }
-            if (row.act === 'options') {
-                const resolved = programs.find(r => r.program.label === draft.selectedProgram);
-                if (resolved) {
-                    await openOptions(resolved);
-                }
-            } else if (row.act === 'create') {
+            if (row.act === 'create') {
                 const name = mode === 'session' ? (quickPick.value.trim() || suggestedName) : (quickPick.value.trim() || undefined);
                 const error = name !== undefined ? validate?.(name) : undefined;
                 if (error) {
@@ -497,10 +482,15 @@ function showMainWindow(
             } else if (row.act === 'direction') {
                 finish({ cwd: draft.cwd, command: draft.command, direction: row.direction });
             } else if (row.act === 'program' && row.resolved) {
-                // Selecting a program only records it; it does not launch and the
-                // highlight stays put so it is clear what is chosen.
-                selectProgram(row.resolved, effectivePick(draft, row.resolved));
-                render();
+                // A program with variants opens its own list on click — this is
+                // the per-command options, always reachable, no hover needed. One
+                // without variants is simply recorded. Neither launches.
+                if (row.resolved.program.submenu) {
+                    await openOptions(row.resolved);
+                } else {
+                    selectProgram(row.resolved, effectivePick(draft, row.resolved));
+                    render();
+                }
             } else if (row.act === 'folder') {
                 await suspend(async () => {
                     const cwd = await pickWorkingDirectory(draft.cwd);

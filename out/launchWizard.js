@@ -116,7 +116,7 @@ function pickFlat(title, commands, freeText) {
     });
 }
 function claudeMenu(bin) {
-    return pickFlat('Claude', [bin, `${bin} --resume`, ...CLAUDE_MODELS.map(m => `${bin} --model ${m}`)], bin);
+    return pickFlat('Claude', [bin, `${bin} --resume`, `${bin} --resume --fork-session`, ...CLAUDE_MODELS.map(m => `${bin} --model ${m}`)], bin);
 }
 function codexMenu(bin) {
     return pickFlat('Codex', [bin, `${bin} resume`], `${bin} -m`);
@@ -253,12 +253,6 @@ const DIRECTIONS = [
     { label: 'Split down', direction: 'down', icon: 'down' },
     { label: 'Split up', direction: 'up', icon: 'up' }
 ];
-// Programs are tinted green so they stand out as the pickable list; a colour
-// can only travel on iconPath, not on a `$(icon)` inside the label.
-const GREEN = new vscode.ThemeColor('terminal.ansiGreen');
-function programIcon(selected) {
-    return new vscode.ThemeIcon(selected ? 'circle-filled' : 'circle-outline', GREEN);
-}
 function effectivePick(draft, resolved) {
     return draft.overrides.get(resolved.program.label) ?? basePick(resolved);
 }
@@ -266,7 +260,7 @@ function effectivePick(draft, resolved) {
 // name field has text, which it usually does. The leading icon on every row
 // carries the grouping instead: green circles mark the programs. Every real row
 // sets alwaysShow so typing a name never filters the list out of view.
-function buildRows(mode, draft, programs, preferred, splitIcon) {
+function buildRows(mode, draft, programs, preferred, splitIcon, dotIcon) {
     const rows = [];
     rows.push({
         act: 'folder',
@@ -277,23 +271,15 @@ function buildRows(mode, draft, programs, preferred, splitIcon) {
     });
     for (const resolved of programs) {
         const pick = effectivePick(draft, resolved);
+        const selected = resolved.program.label === draft.selectedProgram;
         rows.push({
             act: 'program',
             resolved,
-            iconPath: programIcon(resolved.program.label === draft.selectedProgram),
+            iconPath: dotIcon(selected),
             label: pick.label,
-            alwaysShow: true
-        });
-    }
-    // One always-visible, easy-to-hit affordance for the highlighted program's
-    // options — shown only when that program actually has any.
-    const selected = programs.find(r => r.program.label === draft.selectedProgram);
-    if (selected?.program.submenu) {
-        rows.push({
-            act: 'options',
-            iconPath: new vscode.ThemeIcon('chevron-right'),
-            label: 'more options',
-            description: selected.bin,
+            // Programs with variants open their list on click, so signal it —
+            // per-row buttons only show on hover, which is easy to miss.
+            description: resolved.program.submenu ? '›' : undefined,
             alwaysShow: true
         });
     }
@@ -344,10 +330,12 @@ function buildRows(mode, draft, programs, preferred, splitIcon) {
  */
 function showMainWindow(mode, draft, programs, extensionUri, suggestedName, validate) {
     const preferred = defaultTerminalLocation();
-    const splitIcon = (dir) => ({
-        light: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-light.svg`),
-        dark: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-dark.svg`)
+    const themedIcon = (dir, name) => ({
+        light: vscode.Uri.joinPath(extensionUri, 'resources', dir, `${name}-light.svg`),
+        dark: vscode.Uri.joinPath(extensionUri, 'resources', dir, `${name}-dark.svg`)
     });
+    const splitIcon = (d) => themedIcon('split', d);
+    const dotIcon = (selected) => themedIcon('dot', selected ? 'filled' : 'outline');
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane';
@@ -357,7 +345,7 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
                     : 'Pick where the new pane goes';
         const selectedRow = (rows) => rows.find(row => row.act === 'program' && row.resolved?.program.label === draft.selectedProgram);
         const render = () => {
-            const rows = buildRows(mode, draft, programs, preferred, splitIcon);
+            const rows = buildRows(mode, draft, programs, preferred, splitIcon, dotIcon);
             quickPick.items = rows;
             const active = selectedRow(rows);
             if (active) {
@@ -404,13 +392,7 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
             if (!row || !row.act) {
                 return;
             }
-            if (row.act === 'options') {
-                const resolved = programs.find(r => r.program.label === draft.selectedProgram);
-                if (resolved) {
-                    await openOptions(resolved);
-                }
-            }
-            else if (row.act === 'create') {
+            if (row.act === 'create') {
                 const name = mode === 'session' ? (quickPick.value.trim() || suggestedName) : (quickPick.value.trim() || undefined);
                 const error = name !== undefined ? validate?.(name) : undefined;
                 if (error) {
@@ -423,10 +405,16 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
                 finish({ cwd: draft.cwd, command: draft.command, direction: row.direction });
             }
             else if (row.act === 'program' && row.resolved) {
-                // Selecting a program only records it; it does not launch and the
-                // highlight stays put so it is clear what is chosen.
-                selectProgram(row.resolved, effectivePick(draft, row.resolved));
-                render();
+                // A program with variants opens its own list on click — this is
+                // the per-command options, always reachable, no hover needed. One
+                // without variants is simply recorded. Neither launches.
+                if (row.resolved.program.submenu) {
+                    await openOptions(row.resolved);
+                }
+                else {
+                    selectProgram(row.resolved, effectivePick(draft, row.resolved));
+                    render();
+                }
             }
             else if (row.act === 'folder') {
                 await suspend(async () => {
