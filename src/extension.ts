@@ -211,21 +211,20 @@ export function activate(context: vscode.ExtensionContext) {
             nextId++;
         }
 
-        const choice = await runLaunchWizard('session', String(nextId));
-        if (!choice) {
+        const choice = await runLaunchWizard('session', String(nextId), value => {
+            if (!value.trim()) {
+                return 'Session name cannot be empty.';
+            }
+            if (sessions.includes(value.trim())) {
+                return `Session name "${value.trim()}" already exists.`;
+            }
+            return undefined;
+        });
+        if (!choice || !choice.name) {
             return;
         }
 
         const newName = choice.name;
-        if (!newName) {
-            vscode.window.showErrorMessage('Session name cannot be empty.');
-            return;
-        }
-        if (sessions.includes(newName)) {
-            vscode.window.showErrorMessage(`Session name "${newName}" already exists.`);
-            return;
-        }
-
         try {
             await tmuxService.newSession(newName, choice);
             tmuxSessionProvider.refresh();

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as path from 'path';
 import * as util from 'util';
 import { LaunchOptions, SplitDirection } from './tmuxService';
 
@@ -15,12 +16,18 @@ export interface LaunchChoice extends LaunchOptions {
 
 // A program offered on the "what to run" step. `bins` are probed in order and
 // the first one present is used, which is how Python resolves python3 before
-// python. An empty `command` means "let tmux start its default shell".
+// python. An empty command means "let tmux start its default shell".
 interface Program {
     label: string;
     bins: string[];
     detail?: string;
-    submenu?: (bin: string) => Promise<string | undefined>;
+    submenu?: (bin: string) => Promise<Picked | undefined>;
+}
+
+// A chosen command plus how to name it in the summary line.
+interface Picked {
+    command: string;
+    label: string;
 }
 
 const ALT_SHELLS = ['zsh', 'fish', 'sh', 'nu', 'ksh', 'dash'];
@@ -72,31 +79,33 @@ async function installedFrom(bins: string[]): Promise<string[]> {
 }
 
 // A flat list plus a free-text entry built from whatever the user types, which
-// is how a model name that isn't listed still gets through. Returns the chosen
-// command, or undefined when dismissed.
+// is how a model name that isn't listed still gets through.
 function pickFlat(
     title: string,
-    entries: { label: string; command: string; detail?: string }[],
-    freeText?: { label: (value: string) => string; command: (value: string) => string }
-): Promise<string | undefined> {
+    entries: (vscode.QuickPickItem & Picked)[],
+    freeText?: (value: string) => Picked
+): Promise<Picked | undefined> {
     return new Promise(resolve => {
-        const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & { command?: string }>();
+        const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & Partial<Picked>>();
         quickPick.title = title;
         quickPick.items = entries;
         if (freeText) {
             quickPick.placeholder = 'Pick one, or type a value and press Enter';
             quickPick.onDidChangeValue(value => {
                 const typed = value.trim();
-                quickPick.items = typed
-                    ? [...entries, { label: freeText.label(typed), command: freeText.command(typed) }]
-                    : entries;
+                if (!typed) {
+                    quickPick.items = entries;
+                    return;
+                }
+                quickPick.items = [...entries, { ...freeText(typed) }];
             });
         }
 
         let settled = false;
         quickPick.onDidAccept(() => {
+            const item = quickPick.selectedItems[0];
             settled = true;
-            resolve(quickPick.selectedItems[0]?.command);
+            resolve(item?.command === undefined ? undefined : { command: item.command, label: item.label });
             quickPick.hide();
         });
         quickPick.onDidHide(() => {
@@ -109,45 +118,45 @@ function pickFlat(
     });
 }
 
-function claudeMenu(bin: string): Promise<string | undefined> {
+function claudeMenu(bin: string): Promise<Picked | undefined> {
     return pickFlat(
         'Claude',
         [
             { label: 'Resume…', command: `${bin} --resume`, detail: 'Pick a previous conversation' },
             ...CLAUDE_MODELS.map(model => ({ label: model, command: `${bin} --model ${model}`, detail: `Latest ${model} model` }))
         ],
-        { label: value => `Model: ${value}`, command: value => `${bin} --model ${value}` }
+        value => ({ label: value, command: `${bin} --model ${value}` })
     );
 }
 
-function codexMenu(bin: string): Promise<string | undefined> {
+function codexMenu(bin: string): Promise<Picked | undefined> {
     return pickFlat(
         'Codex',
         [{ label: 'Resume…', command: `${bin} resume`, detail: 'Pick a previous session' }],
-        { label: value => `Model: ${value}`, command: value => `${bin} -m ${value}` }
+        value => ({ label: value, command: `${bin} -m ${value}` })
     );
 }
 
-function geminiMenu(bin: string): Promise<string | undefined> {
+function geminiMenu(bin: string): Promise<Picked | undefined> {
     return pickFlat(
         'Gemini',
         [
             { label: 'Resume…', command: `${bin} --resume`, detail: 'Load a previous session' },
             ...GEMINI_MODELS.map(model => ({ label: model, command: `${bin} -m ${model}` }))
         ],
-        { label: value => `Model: ${value}`, command: value => `${bin} -m ${value}` }
+        value => ({ label: value, command: `${bin} -m ${value}` })
     );
 }
 
-function aiderMenu(bin: string): Promise<string | undefined> {
+function aiderMenu(bin: string): Promise<Picked | undefined> {
     return pickFlat(
         'Aider',
         [{ label: 'Restore chat history', command: `${bin} --restore-chat-history`, detail: 'Continue the last conversation' }],
-        { label: value => `Model: ${value}`, command: value => `${bin} --model ${value}` }
+        value => ({ label: value, command: `${bin} --model ${value}` })
     );
 }
 
-async function shellMenu(): Promise<string | undefined> {
+async function shellMenu(): Promise<Picked | undefined> {
     const shells = await installedFrom(ALT_SHELLS);
     if (shells.length === 0) {
         vscode.window.showInformationMessage('No other shells found on this system.');
@@ -156,7 +165,7 @@ async function shellMenu(): Promise<string | undefined> {
     return pickFlat('Shell', shells.map(shell => ({ label: shell, command: shell })));
 }
 
-async function replMenu(): Promise<string | undefined> {
+async function replMenu(): Promise<Picked | undefined> {
     const repls = await installedFrom(ALT_REPLS);
     if (repls.length === 0) {
         vscode.window.showInformationMessage('No other REPLs found on this system.');
@@ -187,7 +196,7 @@ interface ProgramItem extends vscode.QuickPickItem {
 
 // Selecting an entry runs it with no arguments; the button on the right opens
 // that entry's options instead, so the common case stays a single click.
-async function pickProgram(): Promise<string | undefined> {
+async function pickProgram(): Promise<Picked | undefined> {
     const moreButton: vscode.QuickInputButton = {
         iconPath: new vscode.ThemeIcon('ellipsis'),
         tooltip: 'More options'
@@ -211,12 +220,12 @@ async function pickProgram(): Promise<string | undefined> {
 
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick<ProgramItem>();
-        quickPick.title = 'Run in the new pane';
+        quickPick.title = 'Run';
         quickPick.placeholder = 'Select to run it directly, or use ⋯ for options';
         quickPick.items = items;
 
         let settled = false;
-        const finish = (value: string | undefined) => {
+        const finish = (value: Picked | undefined) => {
             settled = true;
             resolve(value);
             quickPick.hide();
@@ -224,8 +233,12 @@ async function pickProgram(): Promise<string | undefined> {
 
         quickPick.onDidAccept(() => {
             const item = quickPick.selectedItems[0];
+            if (!item) {
+                finish(undefined);
+                return;
+            }
             // "Shell" carries no command: tmux then starts its default shell.
-            finish(item ? (item.program.label === 'Shell' ? '' : item.bin) : undefined);
+            finish({ command: item.program.label === 'Shell' ? '' : item.bin, label: item.program.label });
         });
 
         quickPick.onDidTriggerItemButton(async event => {
@@ -247,7 +260,7 @@ async function pickProgram(): Promise<string | undefined> {
     });
 }
 
-async function pickWorkingDirectory(): Promise<string | undefined> {
+async function pickWorkingDirectory(current?: string): Promise<string | undefined> {
     const folders = vscode.workspace.workspaceFolders ?? [];
     const items: (vscode.QuickPickItem & { path?: string; action?: 'browse' | 'enter' })[] = [
         ...folders.map((folder, index) => ({
@@ -280,85 +293,204 @@ async function pickWorkingDirectory(): Promise<string | undefined> {
 
     return vscode.window.showInputBox({
         title: 'Working directory',
-        value: folders[0]?.uri.fsPath,
+        value: current ?? folders[0]?.uri.fsPath,
         prompt: 'Path the new pane should start in'
     });
 }
 
-const DIRECTIONS: { label: string; icon: string; direction: SplitDirection }[] = [
-    { label: 'Split Right', icon: 'arrow-right', direction: 'right' },
-    { label: 'Split Left', icon: 'arrow-left', direction: 'left' },
-    { label: 'Split Down', icon: 'arrow-down', direction: 'down' },
-    { label: 'Split Up', icon: 'arrow-up', direction: 'up' }
-];
-
-async function pickDirection(): Promise<SplitDirection | undefined> {
-    const picked = await vscode.window.showQuickPick(
-        DIRECTIONS.map(entry => ({
-            label: `$(${entry.icon}) ${entry.label}`,
-            direction: entry.direction
-        })),
-        { title: 'Create' }
-    );
-    return picked?.direction;
-}
-
-async function pickLocation(): Promise<vscode.TerminalLocation | undefined | null> {
+async function pickLocation(): Promise<vscode.TerminalLocation | undefined> {
     const picked = await vscode.window.showQuickPick(
         [
-            { label: '$(add) Create', detail: 'In the panel (default)', location: vscode.TerminalLocation.Panel },
-            { label: '$(split-horizontal) Create in editor area', location: vscode.TerminalLocation.Editor }
+            { label: 'Panel', detail: 'Bottom panel (default)', location: vscode.TerminalLocation.Panel },
+            { label: 'Editor area', detail: 'As an editor tab', location: vscode.TerminalLocation.Editor }
         ],
-        { title: 'Create' }
+        { title: 'Open the terminal in' }
     );
-    return picked ? picked.location : null;
+    return picked?.location;
+}
+
+// Everything that isn't the primary input, carried across re-shows of the one
+// window and rendered into its summary line.
+interface Draft {
+    cwd?: string;
+    command?: string;
+    commandLabel: string;
+    location: vscode.TerminalLocation;
+}
+
+const FOLDER_BUTTON: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('folder-opened'), tooltip: 'Working directory' };
+const RUN_BUTTON: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('play'), tooltip: 'What to run' };
+const LOCATION_BUTTON: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('layout'), tooltip: 'Where to open the terminal' };
+
+function summarise(draft: Draft, mode: LaunchMode): string {
+    const folder = draft.cwd ? path.basename(draft.cwd) : 'default';
+    const parts = [`Folder: ${folder}`, `Run: ${draft.commandLabel}`];
+    if (mode !== 'split') {
+        parts.push(`Terminal: ${draft.location === vscode.TerminalLocation.Editor ? 'Editor area' : 'Panel'}`);
+    }
+    return `${parts.join('   ·   ')}   ·   change with the buttons above`;
+}
+
+// Runs the sub-picker behind a title button. Returns false when the user backed
+// out of it, so the caller knows nothing changed.
+async function applyButton(button: vscode.QuickInputButton, draft: Draft, mode: LaunchMode): Promise<void> {
+    if (button === FOLDER_BUTTON) {
+        const cwd = await pickWorkingDirectory(draft.cwd);
+        if (cwd) {
+            draft.cwd = cwd;
+        }
+        return;
+    }
+    if (button === RUN_BUTTON) {
+        const picked = await pickProgram();
+        if (picked) {
+            draft.command = picked.command || undefined;
+            draft.commandLabel = picked.label;
+        }
+        return;
+    }
+    if (button === LOCATION_BUTTON && mode !== 'split') {
+        const location = await pickLocation();
+        if (location !== undefined) {
+            draft.location = location;
+        }
+    }
+}
+
+export type NameValidator = (value: string) => string | undefined;
+
+type NameResult =
+    | { type: 'accept'; value: string }
+    | { type: 'button'; value: string; button: vscode.QuickInputButton }
+    | { type: 'cancel' };
+
+function showNameInput(mode: LaunchMode, value: string, draft: Draft, validate?: NameValidator): Promise<NameResult> {
+    return new Promise(resolve => {
+        const input = vscode.window.createInputBox();
+        input.title = mode === 'session' ? 'New session' : 'New window';
+        input.value = value;
+        input.prompt = summarise(draft, mode);
+        input.placeholder = mode === 'window' ? 'Window name (optional)' : 'Session name';
+        input.buttons = mode === 'session' ? [FOLDER_BUTTON, RUN_BUTTON, LOCATION_BUTTON] : [FOLDER_BUTTON, RUN_BUTTON];
+        input.validationMessage = validate?.(value);
+
+        let settled = false;
+        const finish = (result: NameResult) => {
+            settled = true;
+            resolve(result);
+            input.hide();
+        };
+
+        input.onDidChangeValue(current => {
+            input.validationMessage = validate?.(current);
+        });
+
+        input.onDidAccept(() => {
+            // Refuse the name here rather than after the window closes, so the
+            // problem is shown next to the field being corrected.
+            if (validate?.(input.value)) {
+                return;
+            }
+            finish({ type: 'accept', value: input.value });
+        });
+        input.onDidTriggerButton(button => finish({ type: 'button', value: input.value, button }));
+        input.onDidHide(() => {
+            if (!settled) {
+                resolve({ type: 'cancel' });
+            }
+            input.dispose();
+        });
+        input.show();
+    });
+}
+
+const DIRECTIONS: { label: string; icon: string; direction: SplitDirection }[] = [
+    { label: 'Right', icon: 'arrow-right', direction: 'right' },
+    { label: 'Left', icon: 'arrow-left', direction: 'left' },
+    { label: 'Down', icon: 'arrow-down', direction: 'down' },
+    { label: 'Up', icon: 'arrow-up', direction: 'up' }
+];
+
+type DirectionResult =
+    | { type: 'accept'; direction: SplitDirection }
+    | { type: 'button'; button: vscode.QuickInputButton }
+    | { type: 'cancel' };
+
+function showDirectionPick(draft: Draft): Promise<DirectionResult> {
+    return new Promise(resolve => {
+        const quickPick = vscode.window.createQuickPick<vscode.QuickPickItem & { direction: SplitDirection }>();
+        quickPick.title = 'Split pane';
+        quickPick.placeholder = summarise(draft, 'split');
+        quickPick.items = DIRECTIONS.map(entry => ({
+            label: `$(${entry.icon}) ${entry.label}`,
+            direction: entry.direction
+        }));
+        quickPick.buttons = [FOLDER_BUTTON, RUN_BUTTON];
+
+        let settled = false;
+        const finish = (result: DirectionResult) => {
+            settled = true;
+            resolve(result);
+            quickPick.hide();
+        };
+
+        quickPick.onDidAccept(() => {
+            const item = quickPick.selectedItems[0];
+            finish(item ? { type: 'accept', direction: item.direction } : { type: 'cancel' });
+        });
+        quickPick.onDidTriggerButton(button => finish({ type: 'button', button }));
+        quickPick.onDidHide(() => {
+            if (!settled) {
+                resolve({ type: 'cancel' });
+            }
+            quickPick.dispose();
+        });
+        quickPick.show();
+    });
 }
 
 /**
- * Walks the shared creation flow. Steps that don't apply to the mode are
- * skipped: a split has no name, and only a split picks a direction. Returns
- * undefined if the user dismisses any step.
+ * One window, not a sequence of steps. Sessions and windows show a name field
+ * — typing a name and pressing Enter is the whole interaction — while a split
+ * shows the four directions. Working directory, what to run, and where to open
+ * the terminal all have defaults, are visible in the summary line, and change
+ * through the title buttons only if the user wants them to.
  */
-export async function runLaunchWizard(mode: LaunchMode, defaultName?: string): Promise<LaunchChoice | undefined> {
-    const choice: LaunchChoice = {};
-
-    if (mode !== 'split') {
-        const name = await vscode.window.showInputBox({
-            title: mode === 'session' ? 'New session' : 'New window',
-            prompt: mode === 'session' ? 'Session name' : 'Window name (leave empty for the default)',
-            value: defaultName
-        });
-        if (name === undefined) {
-            return undefined;
-        }
-        choice.name = name.trim() || undefined;
-    }
-
-    const cwd = await pickWorkingDirectory();
-    if (cwd === undefined) {
-        return undefined;
-    }
-    choice.cwd = cwd;
-
-    const command = await pickProgram();
-    if (command === undefined) {
-        return undefined;
-    }
-    choice.command = command || undefined;
+export async function runLaunchWizard(
+    mode: LaunchMode,
+    defaultName?: string,
+    validate?: NameValidator
+): Promise<LaunchChoice | undefined> {
+    const draft: Draft = {
+        cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        command: undefined,
+        commandLabel: 'Shell',
+        location: vscode.TerminalLocation.Panel
+    };
 
     if (mode === 'split') {
-        const direction = await pickDirection();
-        if (!direction) {
-            return undefined;
+        for (;;) {
+            const result = await showDirectionPick(draft);
+            if (result.type === 'cancel') {
+                return undefined;
+            }
+            if (result.type === 'accept') {
+                return { ...draft, direction: result.direction };
+            }
+            await applyButton(result.button, draft, mode);
         }
-        choice.direction = direction;
-    } else {
-        const location = await pickLocation();
-        if (location === null) {
-            return undefined;
-        }
-        choice.location = location;
     }
 
-    return choice;
+    let value = defaultName ?? '';
+    for (;;) {
+        const result = await showNameInput(mode, value, draft, validate);
+        if (result.type === 'cancel') {
+            return undefined;
+        }
+        value = result.value;
+        if (result.type === 'accept') {
+            return { ...draft, name: value.trim() || undefined };
+        }
+        await applyButton(result.button, draft, mode);
+    }
 }
