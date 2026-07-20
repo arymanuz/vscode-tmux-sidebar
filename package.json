@@ -111,30 +111,6 @@
         "icon": "$(split-horizontal)"
       },
       {
-        "command": "vscode-tmux-sidebar.split.right",
-        "title": "Split Right",
-        "category": "Tmux",
-        "icon": "$(arrow-right)"
-      },
-      {
-        "command": "vscode-tmux-sidebar.split.left",
-        "title": "Split Left",
-        "category": "Tmux",
-        "icon": "$(arrow-left)"
-      },
-      {
-        "command": "vscode-tmux-sidebar.split.down",
-        "title": "Split Down",
-        "category": "Tmux",
-        "icon": "$(arrow-down)"
-      },
-      {
-        "command": "vscode-tmux-sidebar.split.up",
-        "title": "Split Up",
-        "category": "Tmux",
-        "icon": "$(arrow-up)"
-      },
-      {
         "command": "vscode-tmux-sidebar.inline.newWindow",
         "title": "New Window",
         "category": "Tmux",
@@ -197,26 +173,6 @@
         },
         {
           "command": "vscode-tmux-sidebar.splitPane",
-          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
-          "group": "1_modification"
-        },
-        {
-          "command": "vscode-tmux-sidebar.split.right",
-          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
-          "group": "1_modification"
-        },
-        {
-          "command": "vscode-tmux-sidebar.split.left",
-          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
-          "group": "1_modification"
-        },
-        {
-          "command": "vscode-tmux-sidebar.split.down",
-          "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
-          "group": "1_modification"
-        },
-        {
-          "command": "vscode-tmux-sidebar.split.up",
           "when": "view == vscode-tmux-sidebar && viewItem == tmuxPane",
           "group": "1_modification"
         },

@@ -340,15 +340,6 @@ function activate(context) {
         await tmuxService.splitPane(targetPane, choice.direction, choice);
         tmuxSessionProvider.refresh();
     });
-    // Context-menu shortcuts that skip the wizard entirely.
-    const directSplitCommands = ['right', 'left', 'down', 'up'].map(direction => vscode.commands.registerCommand(`vscode-tmux-sidebar.split.${direction}`, async (item) => {
-        const targetPane = targetOf(item);
-        if (!targetPane) {
-            return;
-        }
-        await tmuxService.splitPane(targetPane, direction);
-        tmuxSessionProvider.refresh();
-    }));
     const inlineNewWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.inline.newWindow', async (item) => {
         if (!item || !item.session || !item.session.name) {
             vscode.window.showErrorMessage('Invalid session data for new window operation');
@@ -367,7 +358,7 @@ function activate(context) {
             // Error is already shown by the service
         }
     });
-    context.subscriptions.push(attachCommand, refreshCommand, toggleAutoRefreshCommand, renameCommand, renameWindowCommand, newCommand, deleteCommand, killWindowCommand, killPaneCommand, newWindowCommand, splitPaneCommand, ...directSplitCommands, inlineNewWindowCommand, tmuxSessionProvider // Add provider to dispose auto-refresh on deactivation
+    context.subscriptions.push(attachCommand, refreshCommand, toggleAutoRefreshCommand, renameCommand, renameWindowCommand, newCommand, deleteCommand, killWindowCommand, killPaneCommand, newWindowCommand, splitPaneCommand, inlineNewWindowCommand, tmuxSessionProvider // Add provider to dispose auto-refresh on deactivation
     );
 }
 function deactivate() { }

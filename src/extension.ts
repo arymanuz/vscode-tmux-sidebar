@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TmuxSessionProvider, TmuxSessionTreeItem, TmuxWindowTreeItem, TmuxPaneTreeItem } from './treeProvider';
-import { TmuxService, TMUX_BIN, SplitDirection } from './tmuxService';
+import { TmuxService, TMUX_BIN } from './tmuxService';
 import { runLaunchWizard } from './launchWizard';
 
 // Create a terminal that attaches to a tmux/psmux session, making the
@@ -356,17 +356,6 @@ export function activate(context: vscode.ExtensionContext) {
         tmuxSessionProvider.refresh();
     });
 
-    // Context-menu shortcuts that skip the wizard entirely.
-    const directSplitCommands = (['right', 'left', 'down', 'up'] as SplitDirection[]).map(direction =>
-        vscode.commands.registerCommand(`vscode-tmux-sidebar.split.${direction}`, async (item: TmuxPaneTreeItem) => {
-            const targetPane = targetOf(item);
-            if (!targetPane) {
-                return;
-            }
-            await tmuxService.splitPane(targetPane, direction);
-            tmuxSessionProvider.refresh();
-        })
-    );
 
     const inlineNewWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.inline.newWindow', async (item: TmuxSessionTreeItem) => {
         if (!item || !item.session || !item.session.name) {
@@ -400,7 +389,6 @@ export function activate(context: vscode.ExtensionContext) {
         killPaneCommand,
         newWindowCommand,
         splitPaneCommand,
-        ...directSplitCommands,
         inlineNewWindowCommand,
         tmuxSessionProvider // Add provider to dispose auto-refresh on deactivation
     );
