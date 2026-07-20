@@ -289,7 +289,7 @@ const DIRECTIONS: { label: string; direction: SplitDirection; icon: string }[] =
     { label: 'Split up', direction: 'up', icon: 'up' }
 ];
 
-type RowAction = 'create' | 'direction' | 'folder' | 'program';
+type RowAction = 'create' | 'direction' | 'folder' | 'program' | 'options';
 
 interface Row extends vscode.QuickPickItem {
     act?: RowAction;
@@ -298,17 +298,22 @@ interface Row extends vscode.QuickPickItem {
     resolved?: ResolvedProgram;
 }
 
-function separator(label: string): Row {
-    return { label, kind: vscode.QuickPickItemKind.Separator };
+// Programs are tinted green so they stand out as the pickable list; a colour
+// can only travel on iconPath, not on a `$(icon)` inside the label.
+const GREEN = new vscode.ThemeColor('terminal.ansiGreen');
+
+function programIcon(selected: boolean): vscode.ThemeIcon {
+    return new vscode.ThemeIcon(selected ? 'circle-filled' : 'circle-outline', GREEN);
 }
 
 function effectivePick(draft: Draft, resolved: ResolvedProgram): Picked {
     return draft.overrides.get(resolved.program.label) ?? basePick(resolved);
 }
 
-// Reads top to bottom the way the task does: folder, what to run, then the
-// action. Every real row sets alwaysShow so typing a name never filters the
-// list out of view.
+// A flat list — no separators, since a quick pick hides them the moment the
+// name field has text, which it usually does. The leading icon on every row
+// carries the grouping instead: green circles mark the programs. Every real row
+// sets alwaysShow so typing a name never filters the list out of view.
 function buildRows(
     mode: LaunchMode,
     draft: Draft,
@@ -318,28 +323,39 @@ function buildRows(
 ): Row[] {
     const rows: Row[] = [];
 
-    rows.push(separator('Folder'));
     rows.push({
         act: 'folder',
-        label: `$(folder-opened) ${draft.cwd ? path.basename(draft.cwd) : 'Default'}`,
+        iconPath: new vscode.ThemeIcon('folder-opened'),
+        label: draft.cwd ? path.basename(draft.cwd) : 'Default',
         description: draft.cwd,
         alwaysShow: true
     });
 
-    rows.push(separator('Run'));
     for (const resolved of programs) {
         const pick = effectivePick(draft, resolved);
-        const selected = resolved.program.label === draft.selectedProgram;
         rows.push({
             act: 'program',
             resolved,
-            label: `$(${selected ? 'circle-filled' : 'circle-outline'}) ${pick.label}`,
+            iconPath: programIcon(resolved.program.label === draft.selectedProgram),
+            label: pick.label,
+            alwaysShow: true
+        });
+    }
+
+    // One always-visible, easy-to-hit affordance for the highlighted program's
+    // options — shown only when that program actually has any.
+    const selected = programs.find(r => r.program.label === draft.selectedProgram);
+    if (selected?.program.submenu) {
+        rows.push({
+            act: 'options',
+            iconPath: new vscode.ThemeIcon('chevron-right'),
+            label: 'more options',
+            description: selected.bin,
             alwaysShow: true
         });
     }
 
     if (mode === 'split') {
-        rows.push(separator('Create'));
         for (const entry of DIRECTIONS) {
             rows.push({
                 act: 'direction',
@@ -352,18 +368,32 @@ function buildRows(
         return rows;
     }
 
-    rows.push(separator('Create'));
     if (mode === 'window') {
         // A window belongs to a session already attached somewhere, so there
         // is no terminal placement to choose.
-        rows.push({ act: 'create', label: '$(add) Create window', alwaysShow: true });
+        rows.push({ act: 'create', iconPath: new vscode.ThemeIcon('add'), label: 'Create window', alwaysShow: true });
         return rows;
     }
 
-    // Order the two so the location VS Code itself defaults to comes first.
-    const panel: Row = { act: 'create', location: vscode.TerminalLocation.Panel, label: '$(layout-panel) Create in panel', alwaysShow: true };
-    const editor: Row = { act: 'create', location: vscode.TerminalLocation.Editor, label: '$(window) Create in editor area', alwaysShow: true };
-    rows.push(...(preferred === vscode.TerminalLocation.Editor ? [editor, panel] : [panel, editor]));
+    // Editor first, panel second, with the location VS Code itself defaults to
+    // tagged rather than reordered.
+    const tag = (location: vscode.TerminalLocation) => (location === preferred ? 'default' : undefined);
+    rows.push({
+        act: 'create',
+        location: vscode.TerminalLocation.Editor,
+        iconPath: new vscode.ThemeIcon('window'),
+        label: 'Create in editor area',
+        description: tag(vscode.TerminalLocation.Editor),
+        alwaysShow: true
+    });
+    rows.push({
+        act: 'create',
+        location: vscode.TerminalLocation.Panel,
+        iconPath: new vscode.ThemeIcon('layout-panel'),
+        label: 'Create in panel',
+        description: tag(vscode.TerminalLocation.Panel),
+        alwaysShow: true
+    });
     return rows;
 }
 
@@ -387,12 +417,6 @@ function showMainWindow(
         dark: vscode.Uri.joinPath(extensionUri, 'resources', 'split', `${dir}-dark.svg`)
     });
 
-    // Always visible, unlike a per-row button which only appears on hover.
-    const optionsButton: vscode.QuickInputButton = {
-        iconPath: new vscode.ThemeIcon('gear'),
-        tooltip: 'Options for the selected program'
-    };
-
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick<Row>();
         quickPick.title = mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane';
@@ -400,7 +424,6 @@ function showMainWindow(
             mode === 'session' ? `Session name (default: ${suggestedName})`
                 : mode === 'window' ? 'Window name (optional)'
                     : 'Pick where the new pane goes';
-        quickPick.buttons = [optionsButton];
 
         const selectedRow = (rows: Row[]): Row | undefined =>
             rows.find(row => row.act === 'program' && row.resolved?.program.label === draft.selectedProgram);
@@ -453,19 +476,17 @@ function showMainWindow(
             });
         };
 
-        quickPick.onDidTriggerButton(async () => {
-            const resolved = programs.find(r => r.program.label === draft.selectedProgram);
-            if (resolved) {
-                await openOptions(resolved);
-            }
-        });
-
         quickPick.onDidAccept(async () => {
             const row = quickPick.activeItems[0];
             if (!row || !row.act) {
                 return;
             }
-            if (row.act === 'create') {
+            if (row.act === 'options') {
+                const resolved = programs.find(r => r.program.label === draft.selectedProgram);
+                if (resolved) {
+                    await openOptions(resolved);
+                }
+            } else if (row.act === 'create') {
                 const name = mode === 'session' ? (quickPick.value.trim() || suggestedName) : (quickPick.value.trim() || undefined);
                 const error = name !== undefined ? validate?.(name) : undefined;
                 if (error) {
