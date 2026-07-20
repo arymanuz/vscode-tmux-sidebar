@@ -214,19 +214,24 @@ function pickWorkingDirectory(current) {
         quickPick.title = 'Working directory';
         quickPick.placeholder = 'Type a path, pick a project folder, or Browse…';
         quickPick.buttons = [browseButton];
-        quickPick.ignoreFocusOut = true;
         quickPick.value = current ?? '';
         quickPick.items = build(quickPick.value);
         quickPick.onDidChangeValue(value => {
             quickPick.items = build(value);
         });
         let settled = false;
+        // On a remote (WSL/SSH) showOpenDialog is itself a quick pick, so it
+        // can't coexist with this one. Hide this window for the dialog and bring
+        // it back if the dialog was dismissed.
+        let browsing = false;
         const finish = (value) => {
             settled = true;
             resolve(value);
             quickPick.hide();
         };
         quickPick.onDidTriggerButton(async () => {
+            browsing = true;
+            quickPick.hide();
             const chosen = await vscode.window.showOpenDialog({
                 canSelectFolders: true,
                 canSelectFiles: false,
@@ -234,8 +239,12 @@ function pickWorkingDirectory(current) {
                 defaultUri: current ? vscode.Uri.file(current) : undefined,
                 openLabel: 'Use this folder'
             });
+            browsing = false;
             if (chosen?.[0]) {
-                finish(chosen[0].fsPath); // dismissing the dialog just leaves this window open
+                finish(chosen[0].fsPath);
+            }
+            else {
+                quickPick.show();
             }
         });
         quickPick.onDidAccept(() => {
@@ -243,6 +252,9 @@ function pickWorkingDirectory(current) {
             finish(item?.path ?? (quickPick.value.trim() || undefined));
         });
         quickPick.onDidHide(() => {
+            if (browsing) {
+                return;
+            }
             if (!settled) {
                 resolve(undefined);
             }
@@ -352,14 +364,26 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane';
         quickPick.placeholder =
-            mode === 'session' ? `Session name (default: ${suggestedName})`
+            mode === 'session' ? 'Session name'
                 : mode === 'window' ? 'Window name (optional)'
                     : 'Pick where the new pane goes';
-        const selectedRow = (rows) => rows.find(row => row.act === 'program' && row.resolved?.program.label === draft.selectedProgram);
-        const render = () => {
+        // Pre-fill the suggested session name so pressing Enter straight away
+        // creates it; the box is empty (and separators are gone) so nothing is
+        // hidden by having text in it.
+        quickPick.value = mode === 'session' ? suggestedName : '';
+        // The row Enter should trigger by default: the create location VS Code
+        // prefers, or the first split direction — never a program row, so the
+        // "type a name and press Enter" path always creates.
+        const defaultActive = (rows) => rows.find(row => row.act === 'create' && (row.location === undefined || row.location === preferred)) ??
+            rows.find(row => row.act === 'create' || row.act === 'direction');
+        // `keepProgram` holds the highlight on a just-clicked program instead;
+        // otherwise it rests on the default action.
+        const render = (keepProgram) => {
             const rows = buildRows(mode, draft, programs, preferred, splitIcon, dotIcon, optionsButton);
             quickPick.items = rows;
-            const active = selectedRow(rows);
+            const active = keepProgram
+                ? rows.find(row => row.act === 'program' && row.resolved?.program.label === keepProgram)
+                : defaultActive(rows);
             if (active) {
                 quickPick.activeItems = [active];
             }
@@ -424,10 +448,9 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
             }
             else if (row.act === 'program' && row.resolved) {
                 // Clicking a program only records it and keeps the highlight
-                // there; the filled button (below) opens its variants. Neither
-                // launches.
+                // there; the filled button opens its variants. Neither launches.
                 selectProgram(row.resolved, effectivePick(draft, row.resolved));
-                render();
+                render(row.resolved.program.label);
             }
             else if (row.act === 'folder') {
                 await suspend(async () => {
