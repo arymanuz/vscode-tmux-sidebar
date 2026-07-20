@@ -376,18 +376,31 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
         // "type a name and press Enter" path always creates.
         const defaultActive = (rows) => rows.find(row => row.act === 'create' && (row.location === undefined || row.location === preferred)) ??
             rows.find(row => row.act === 'create' || row.act === 'direction');
+        // The text box is really the name field, but a quick pick always
+        // filters its list by it and moves the highlight onto whatever label
+        // matches. Re-pinning the highlight on every keystroke keeps typing a
+        // name from disturbing the selection. Label matching itself can't be
+        // turned off — there is no matchOnLabel — so this is the way.
+        let pinned;
         // `keepProgram` holds the highlight on a just-clicked program instead;
         // otherwise it rests on the default action.
         const render = (keepProgram) => {
             const rows = buildRows(mode, draft, programs, preferred, splitIcon, dotIcon, optionsButton);
             quickPick.items = rows;
-            const active = keepProgram
+            pinned = keepProgram
                 ? rows.find(row => row.act === 'program' && row.resolved?.program.label === keepProgram)
                 : defaultActive(rows);
-            if (active) {
-                quickPick.activeItems = [active];
+            if (pinned) {
+                quickPick.activeItems = [pinned];
             }
         };
+        quickPick.matchOnDescription = false;
+        quickPick.matchOnDetail = false;
+        quickPick.onDidChangeValue(() => {
+            if (pinned && quickPick.items.includes(pinned)) {
+                quickPick.activeItems = [pinned];
+            }
+        });
         let suspended = false;
         let settled = false;
         const finish = (choice) => {
