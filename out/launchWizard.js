@@ -122,7 +122,16 @@ function codexMenu(bin) {
     return pickFlat('Codex', [bin, `${bin} resume`], `${bin} -m`);
 }
 function geminiMenu(bin) {
-    return pickFlat('Gemini', [bin, `${bin} --resume`, ...GEMINI_MODELS.map(m => `${bin} -m ${m}`)], `${bin} -m`);
+    // The gemini CLI's --resume loads the most recent session rather than
+    // opening a picker, so it is left out; the model aliases are verified.
+    return pickFlat('Gemini', [bin, ...GEMINI_MODELS.map(m => `${bin} -m ${m}`)], `${bin} -m`);
+}
+// Antigravity (agy), gemini's successor, has its own flags: --model takes a
+// full model name (spaces and all), not the -m aliases, and its resume forms
+// (--continue / --conversation <id>) are either not a picker or need an id, so
+// only the plain command and a free-text model are offered.
+function agyMenu(bin) {
+    return pickFlat('Antigravity', [bin], `${bin} --model`);
 }
 function aiderMenu(bin) {
     return pickFlat('Aider', [bin, `${bin} --restore-chat-history`], `${bin} --model`);
@@ -146,7 +155,8 @@ const PROGRAMS = [
     { label: 'python3', bins: ['python3', 'python'], submenu: replMenu },
     { label: 'claude', bins: ['claude'], submenu: claudeMenu },
     { label: 'codex', bins: ['codex'], submenu: codexMenu },
-    { label: 'gemini', bins: ['gemini', 'agy'], submenu: geminiMenu },
+    { label: 'gemini', bins: ['gemini'], submenu: geminiMenu },
+    { label: 'agy', bins: ['agy'], submenu: agyMenu },
     { label: 'aider', bins: ['aider'], submenu: aiderMenu },
     { label: 'opencode', bins: ['opencode'] },
     { label: 'goose', bins: ['goose'] },
@@ -260,7 +270,7 @@ function effectivePick(draft, resolved) {
 // name field has text, which it usually does. The leading icon on every row
 // carries the grouping instead: green circles mark the programs. Every real row
 // sets alwaysShow so typing a name never filters the list out of view.
-function buildRows(mode, draft, programs, preferred, splitIcon, dotIcon) {
+function buildRows(mode, draft, programs, preferred, splitIcon, dotIcon, optionsButton) {
     const rows = [];
     rows.push({
         act: 'folder',
@@ -277,9 +287,10 @@ function buildRows(mode, draft, programs, preferred, splitIcon, dotIcon) {
             resolved,
             iconPath: dotIcon(selected),
             label: pick.label,
-            // Programs with variants open their list on click, so signal it —
-            // per-row buttons only show on hover, which is easy to miss.
-            description: resolved.program.submenu ? '›' : undefined,
+            // A filled button opens the variants. Item buttons reveal on hover,
+            // but the selected row always shows its button — and the selected
+            // program is exactly the one being configured.
+            buttons: resolved.program.submenu ? [optionsButton] : undefined,
             alwaysShow: true
         });
     }
@@ -336,6 +347,7 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
     });
     const splitIcon = (d) => themedIcon('split', d);
     const dotIcon = (selected) => themedIcon('dot', selected ? 'filled' : 'outline');
+    const optionsButton = { iconPath: themedIcon('more', 'options'), tooltip: 'Options' };
     return new Promise(resolve => {
         const quickPick = vscode.window.createQuickPick();
         quickPick.title = mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane';
@@ -345,7 +357,7 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
                     : 'Pick where the new pane goes';
         const selectedRow = (rows) => rows.find(row => row.act === 'program' && row.resolved?.program.label === draft.selectedProgram);
         const render = () => {
-            const rows = buildRows(mode, draft, programs, preferred, splitIcon, dotIcon);
+            const rows = buildRows(mode, draft, programs, preferred, splitIcon, dotIcon, optionsButton);
             quickPick.items = rows;
             const active = selectedRow(rows);
             if (active) {
@@ -387,6 +399,12 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
                 }
             });
         };
+        quickPick.onDidTriggerItemButton(async (event) => {
+            const resolved = event.item.resolved;
+            if (resolved) {
+                await openOptions(resolved);
+            }
+        });
         quickPick.onDidAccept(async () => {
             const row = quickPick.activeItems[0];
             if (!row || !row.act) {
@@ -405,16 +423,11 @@ function showMainWindow(mode, draft, programs, extensionUri, suggestedName, vali
                 finish({ cwd: draft.cwd, command: draft.command, direction: row.direction });
             }
             else if (row.act === 'program' && row.resolved) {
-                // A program with variants opens its own list on click — this is
-                // the per-command options, always reachable, no hover needed. One
-                // without variants is simply recorded. Neither launches.
-                if (row.resolved.program.submenu) {
-                    await openOptions(row.resolved);
-                }
-                else {
-                    selectProgram(row.resolved, effectivePick(draft, row.resolved));
-                    render();
-                }
+                // Clicking a program only records it and keeps the highlight
+                // there; the filled button (below) opens its variants. Neither
+                // launches.
+                selectProgram(row.resolved, effectivePick(draft, row.resolved));
+                render();
             }
             else if (row.act === 'folder') {
                 await suspend(async () => {
