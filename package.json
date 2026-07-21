@@ -227,223 +227,128 @@
           "type": "array",
           "default": [
             {
-              "bins": [
-                "bash"
-              ],
-              "command": "",
-              "variants": [
-                {
-                  "command": "zsh",
-                  "bin": "zsh"
-                },
-                {
-                  "command": "fish",
-                  "bin": "fish"
-                },
-                {
-                  "command": "sh",
-                  "bin": "sh"
-                },
-                {
-                  "command": "nu",
-                  "bin": "nu"
-                },
-                {
-                  "command": "ksh",
-                  "bin": "ksh"
-                },
-                {
-                  "command": "dash",
-                  "bin": "dash"
-                }
+              "commands": [
+                "{default-shell}",
+                "bash",
+                "zsh",
+                "fish",
+                "sh",
+                "nu",
+                "ksh",
+                "dash"
               ]
             },
             {
-              "bins": [
+              "commands": [
                 "python3",
-                "python"
-              ],
-              "variants": [
-                {
-                  "command": "node",
-                  "bin": "node"
-                },
-                {
-                  "command": "ipython",
-                  "bin": "ipython"
-                },
-                {
-                  "command": "irb",
-                  "bin": "irb"
-                },
-                {
-                  "command": "ghci",
-                  "bin": "ghci"
-                },
-                {
-                  "command": "deno",
-                  "bin": "deno"
-                },
-                {
-                  "command": "bun",
-                  "bin": "bun"
-                }
+                "python",
+                "node",
+                "ipython",
+                "irb",
+                "ghci",
+                "deno",
+                "bun"
               ]
             },
             {
-              "bins": [
-                "claude"
-              ],
-              "variants": [
-                {
-                  "command": "{bin} --resume"
-                },
-                {
-                  "command": "{bin} --resume --fork-session"
-                },
-                {
-                  "command": "{bin} --model opus"
-                },
-                {
-                  "command": "{bin} --model sonnet"
-                },
-                {
-                  "command": "{bin} --model haiku"
-                },
-                {
-                  "command": "{bin} --model fable"
-                }
+              "commands": [
+                "claude",
+                "claude --resume",
+                "claude --resume --fork-session",
+                "claude --model opus",
+                "claude --model sonnet",
+                "claude --model haiku",
+                "claude --model fable"
               ],
               "custom": {
-                "prefix": "{bin} --model",
+                "prefix": "claude --model",
                 "hint": "Claude model — an alias like sonnet, or a full id"
               }
             },
             {
-              "bins": [
-                "codex"
-              ],
-              "variants": [
-                {
-                  "command": "{bin} resume"
-                }
+              "commands": [
+                "codex",
+                "codex resume"
               ],
               "custom": {
-                "prefix": "{bin} -m",
+                "prefix": "codex -m",
                 "hint": "Codex model name"
               }
             },
             {
-              "bins": [
-                "gemini"
-              ],
-              "variants": [
-                {
-                  "command": "{bin} -m auto"
-                },
-                {
-                  "command": "{bin} -m pro"
-                },
-                {
-                  "command": "{bin} -m flash"
-                },
-                {
-                  "command": "{bin} -m flash-lite"
-                }
+              "commands": [
+                "gemini",
+                "gemini -m auto",
+                "gemini -m pro",
+                "gemini -m flash",
+                "gemini -m flash-lite"
               ],
               "custom": {
-                "prefix": "{bin} -m",
+                "prefix": "gemini -m",
                 "hint": "Gemini model name"
               }
             },
             {
-              "bins": [
+              "commands": [
                 "agy"
               ],
               "custom": {
-                "prefix": "{bin} --model",
+                "prefix": "agy --model",
                 "hint": "Antigravity model, e.g. Gemini 3 Pro"
               }
             },
             {
-              "bins": [
-                "aider"
-              ],
-              "variants": [
-                {
-                  "command": "{bin} --restore-chat-history"
-                }
+              "commands": [
+                "aider",
+                "aider --restore-chat-history"
               ],
               "custom": {
-                "prefix": "{bin} --model",
+                "prefix": "aider --model",
                 "hint": "Aider model, e.g. anthropic/claude-sonnet-5"
               }
             },
             {
-              "bins": [
+              "commands": [
                 "opencode"
               ]
             },
             {
-              "bins": [
+              "commands": [
                 "goose"
               ]
             },
             {
-              "bins": [
+              "commands": [
                 "crush"
               ]
             },
             {
-              "bins": [
+              "commands": [
                 "lazygit"
               ]
             },
             {
-              "bins": [
+              "commands": [
                 "tig"
               ]
             },
             {
-              "bins": [
+              "commands": [
                 "gitui"
               ]
             }
           ],
-          "markdownDescription": "Programs offered by the create form. Each entry: `bins` — binaries probed in order, the first installed one is used (the group is hidden when none is); `label` — row name, defaults to the resolved binary; `command` — what runs when picked plain, `{bin}` is replaced by the resolved binary, empty string starts tmux's default shell, omitted means `{bin}`; `variants` — alternative commands (`bin` on a variant shows it only when that binary is installed); `custom` — a free-text model field appended to `prefix`. Edit comfortably via the Tmux Sidebar settings page.",
+          "markdownDescription": "Programs offered by the create form, as groups of commands. A command is both the row label and what runs; its leading binary must be installed for the entry to show, and the group's first available command fronts it (a group with none is hidden). `{default-shell}` stands for the shell tmux itself would start — resolved via `tmux show-options -gv default-shell` when the form opens, launched by its full path, and duplicates of it are dropped. `custom` adds a free-text field whose value is appended to `prefix`. Edit comfortably via the Tmux Sidebar settings page.",
           "items": {
             "type": "object",
             "required": [
-              "bins"
+              "commands"
             ],
             "properties": {
-              "label": {
-                "type": "string"
-              },
-              "bins": {
+              "commands": {
                 "type": "array",
                 "items": {
                   "type": "string"
-                }
-              },
-              "command": {
-                "type": "string"
-              },
-              "variants": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "command"
-                  ],
-                  "properties": {
-                    "command": {
-                      "type": "string"
-                    },
-                    "bin": {
-                      "type": "string"
-                    }
-                  }
                 }
               },
               "custom": {

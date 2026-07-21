@@ -1,44 +1,33 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as path from 'path';
 import * as util from 'util';
+import { TMUX_BIN } from './tmuxService';
 
 const exec = util.promisify(cp.exec);
 
 /**
- * The configurable program list. The defaults live in package.json
- * (tmuxSidebar.programs) — there is no hard-coded list in code any more; the
- * configuration IS the list, and getConfiguration falls back to the manifest
- * default when the user hasn't overridden it.
+ * The configurable program list. A program is a group of commands; the command
+ * string is both what runs and what the row shows, so there is nothing else to
+ * configure per entry. The defaults live in package.json (tmuxSidebar.programs)
+ * — the configuration IS the list, and getConfiguration falls back to the
+ * manifest default when the user hasn't overridden it.
  */
 
-// A variant as configured: an alternative command for a program. `bin`, when
-// set, hides the variant unless that binary is installed (how the alternative
-// shells and REPLs behave).
-export interface VariantSpec {
-    command: string;
-    bin?: string;
-}
+export const DEFAULT_SHELL_TOKEN = '{default-shell}';
 
 export interface CustomSpec {
     prefix: string;
     hint?: string;
 }
 
-// A program as configured. `bins` are probed in order and the first installed
-// one is used — the group is hidden when none is. In `command`,
-// `variants[].command` and `custom.prefix`, the placeholder {bin} is replaced
-// by the resolved binary. An empty `command` starts tmux's default shell; an
-// omitted one runs the resolved binary itself.
 export interface ProgramSpec {
-    label?: string;
-    bins: string[];
-    command?: string;
-    variants?: VariantSpec[];
+    commands: string[];
     custom?: CustomSpec;
 }
 
-// What the create form works with: only installed programs, placeholders
-// resolved.
+// What the create form works with (unchanged shape): the group's first
+// available command carries its row, the rest are the variants.
 export interface Variant {
     label: string;
     command: string;
@@ -54,7 +43,7 @@ export interface ProgramData {
 const asString = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
 // Configuration content is user-editable JSON, so nothing about its shape can
-// be assumed. Entries without a usable `bins` are dropped.
+// be assumed. Entries without any usable command are dropped.
 export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
     if (!Array.isArray(raw)) {
         return [];
@@ -65,35 +54,13 @@ export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
             continue;
         }
         const e = entry as Record<string, unknown>;
-        const bins = Array.isArray(e.bins) ? e.bins.filter((b): b is string => typeof b === 'string' && b.trim() !== '').map(b => b.trim()) : [];
-        if (bins.length === 0) {
+        const commands = Array.isArray(e.commands)
+            ? e.commands.filter((c): c is string => typeof c === 'string' && c.trim() !== '').map(c => c.trim())
+            : [];
+        if (commands.length === 0) {
             continue;
         }
-        const spec: ProgramSpec = { bins };
-        const label = asString(e.label)?.trim();
-        if (label) {
-            spec.label = label;
-        }
-        if (typeof e.command === 'string') {
-            spec.command = e.command;
-        }
-        if (Array.isArray(e.variants)) {
-            const variants: VariantSpec[] = [];
-            for (const v of e.variants) {
-                if (typeof v !== 'object' || v === null) {
-                    continue;
-                }
-                const command = asString((v as Record<string, unknown>).command);
-                if (command === undefined || command.trim() === '') {
-                    continue;
-                }
-                const bin = asString((v as Record<string, unknown>).bin)?.trim();
-                variants.push(bin ? { command, bin } : { command });
-            }
-            if (variants.length > 0) {
-                spec.variants = variants;
-            }
-        }
+        const spec: ProgramSpec = { commands };
         if (typeof e.custom === 'object' && e.custom !== null) {
             const prefix = asString((e.custom as Record<string, unknown>).prefix);
             if (prefix && prefix.trim() !== '') {
@@ -107,13 +74,37 @@ export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
 }
 
 export function getProgramSpecs(): ProgramSpec[] {
-    const raw = vscode.workspace.getConfiguration('tmuxSidebar').get<unknown>('programs');
-    return sanitizeSpecs(raw);
+    const config = vscode.workspace.getConfiguration('tmuxSidebar');
+    const inspected = config.inspect<unknown>('programs');
+    const overridden = inspected !== undefined
+        && (inspected.globalValue !== undefined || inspected.workspaceValue !== undefined || inspected.workspaceFolderValue !== undefined);
+    const specs = sanitizeSpecs(config.get<unknown>('programs'));
+
+    // The manifest default is written for Unix. On Windows, until the user has
+    // saved their own list, the shell group additionally offers PowerShell and
+    // cmd right after the default shell — declared here rather than as
+    // platform toggles in the configuration.
+    if (!overridden && process.platform === 'win32') {
+        for (const spec of specs) {
+            const at = spec.commands.indexOf(DEFAULT_SHELL_TOKEN);
+            if (at !== -1) {
+                spec.commands.splice(at + 1, 0, 'powershell', 'cmd');
+                break;
+            }
+        }
+    }
+    return specs;
+}
+
+/** The binary a command starts with — what existence is checked against. */
+export function binOf(command: string): string {
+    return command.trim().split(/\s+/)[0] ?? '';
 }
 
 // --- Availability ----------------------------------------------------------
 
 const availability = new Map<string, boolean>();
+let defaultShell: string | undefined;
 
 async function probeOne(bin: string): Promise<boolean> {
     const probe = process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`;
@@ -137,8 +128,7 @@ const SAFE_BIN = /^[A-Za-z0-9._+-]+$/;
 export async function probeBins(bins: string[]): Promise<Record<string, boolean>> {
     const unique = [...new Set(bins.map(b => b.trim()).filter(Boolean))];
     const missing = unique.filter(bin => !availability.has(bin));
-    const unsafe = missing.filter(bin => !SAFE_BIN.test(bin));
-    for (const bin of unsafe) {
+    for (const bin of missing.filter(b => !SAFE_BIN.test(b))) {
         availability.set(bin, false);
     }
     const toProbe = missing.filter(bin => SAFE_BIN.test(bin));
@@ -171,69 +161,103 @@ export async function probeBins(bins: string[]): Promise<Record<string, boolean>
     return result;
 }
 
+/**
+ * What tmux itself would start: the global default-shell option (verified
+ * against the tmux man page: show-options -g lists global session options, -v
+ * prints the value alone). tmux needs a running server to answer, so the value
+ * of $SHELL — which is also what default-shell defaults to — is the fallback,
+ * then a hard-coded shell.
+ */
+export async function getDefaultShell(): Promise<string> {
+    if (defaultShell !== undefined) {
+        return defaultShell;
+    }
+    let shell = '';
+    try {
+        const { stdout } = await exec(`${TMUX_BIN} show-options -gv default-shell`);
+        shell = stdout.trim();
+    } catch {
+        // no server running — fall through
+    }
+    if (!shell) {
+        shell = process.platform === 'win32' ? 'powershell' : (process.env.SHELL || '/bin/bash');
+    }
+    defaultShell = shell;
+    return shell;
+}
+
 /** Forget every probe result, so the next check hits the system again. */
 export function resetAvailability(): void {
     availability.clear();
+    defaultShell = undefined;
 }
 
-/** Every binary a spec list mentions: group bins and per-variant bins. */
+/** Every binary a spec list mentions (the default-shell token has none). */
 export function allBins(specs: ProgramSpec[]): string[] {
     const bins: string[] = [];
     for (const spec of specs) {
-        bins.push(...spec.bins);
-        for (const variant of spec.variants ?? []) {
-            if (variant.bin) {
-                bins.push(variant.bin);
+        for (const command of spec.commands) {
+            if (command !== DEFAULT_SHELL_TOKEN) {
+                bins.push(binOf(command));
             }
         }
     }
     return bins;
 }
 
-/** Warm the cache in the background so the first form open is instant. */
+/** Warm the caches in the background so the first form open is instant. */
 export function warmUpPrograms(): void {
     void probeBins(allBins(getProgramSpecs()));
+    void getDefaultShell();
 }
 
 // --- Resolution for the create form ----------------------------------------
 
-const subst = (s: string, bin: string): string => s.split('{bin}').join(bin);
-
 /**
- * Turn the configured specs into what the create form shows: groups whose
- * binaries are installed, with {bin} substituted, hidden variants filtered
- * out, and the plain command prepended as the first variant (the "revert"
- * entry) whenever a group has variants or a custom field at all.
+ * Turn the configured specs into what the create form shows. Per group: the
+ * default-shell token resolves to the concrete shell tmux would start (shown
+ * by name, launched by full path, never probed); every other command is kept
+ * only when its binary is installed. Duplicates by visible label are dropped —
+ * so when the default shell IS bash, the explicit bash entry disappears. The
+ * first surviving command fronts the group; a group where nothing survives is
+ * hidden.
  */
 export async function resolvePrograms(specs: ProgramSpec[]): Promise<ProgramData[]> {
     const installed = await probeBins(allBins(specs));
+    const shell = await getDefaultShell();
+    const shellLabel = path.basename(shell);
 
     const out: ProgramData[] = [];
     for (const spec of specs) {
-        const bin = spec.bins.find(b => installed[b]);
-        if (!bin) {
-            continue;
-        }
-        const label = spec.label ?? bin;
-        const command = spec.command !== undefined ? subst(spec.command, bin) : bin;
-
-        let variants: Variant[] | null = null;
-        if ((spec.variants && spec.variants.length > 0) || spec.custom) {
-            variants = [{ label: command || label, command }];
-            for (const variant of spec.variants ?? []) {
-                if (variant.bin && !installed[variant.bin]) {
-                    continue;
-                }
-                const variantCommand = subst(variant.command, bin);
-                variants.push({ label: variantCommand, command: variantCommand });
+        const variants: Variant[] = [];
+        const seen = new Set<string>();
+        for (const command of spec.commands) {
+            const variant = command === DEFAULT_SHELL_TOKEN
+                ? { label: shellLabel, command: shell }
+                : { label: command, command };
+            if (command !== DEFAULT_SHELL_TOKEN && !installed[binOf(command)]) {
+                continue;
             }
+            if (seen.has(variant.label)) {
+                continue;
+            }
+            seen.add(variant.label);
+            variants.push(variant);
+        }
+        if (variants.length === 0) {
+            continue;
         }
 
         const custom = spec.custom
-            ? { prefix: subst(spec.custom.prefix, bin), hint: spec.custom.hint ?? '' }
+            ? { prefix: spec.custom.prefix, hint: spec.custom.hint ?? '' }
             : null;
 
-        out.push({ label, command, variants, custom });
+        out.push({
+            label: variants[0].label,
+            command: variants[0].command,
+            variants: variants.length > 1 || custom ? variants : null,
+            custom
+        });
     }
     return out;
 }
