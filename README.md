@@ -4,7 +4,7 @@
 
 Easily manage your Tmux sessions, windows, and panes in the VS Code sidebar.
 
-![Extension Screenshot](./assets/pic1.png)
+![Sessions, windows and panes in the sidebar; tmux terminals in the editor area and the panel](./assets/screenshot-overview.png)
 
 ## ✨ Features
 
@@ -12,15 +12,13 @@ Easily manage your Tmux sessions, windows, and panes in the VS Code sidebar.
 -   **🖱️ One-Click Actions**:
     -   **Quick Attach**: Click the launch icon (▶) next to any session, window, or pane to attach it in the VS Code integrated terminal.
     -   **Smart Terminal Reuse**: Reuses the terminal already attached to a session instead of opening another one.
--   **⚡ Efficient Management**:
-    -   **Sessions**: Create, rename, and delete.
-    -   **Windows**: Quickly create new windows via inline icons or the context menu.
-    -   **Panes**: Split right or down with a single click, or close them.
+-   **📝 Create Form**: One form for new sessions, windows and splits — name, working directory, and what to run, with big create buttons at the end. Panes split in all four directions (right, left, down, up).
+-   **🚀 Program Launcher**: Start a pane straight into what you need: your shell, a Python/Node REPL, AI tools (claude, codex, gemini, aider — with resume and model variants), lazygit and friends, or any command you type. Only what is actually installed is offered, and `{default-shell}` resolves to the shell tmux itself would start. The whole list is yours to edit on the settings page.
+-   **⚙️ Settings Page**: Auto-refresh with its interval, where new terminals open (VS Code default / editor area / panel), and the full program list — with installed-state dots, a re-check button, and reordering.
 -   **🪟 Windows Support**: Uses [psmux](https://github.com/psmux/psmux) on Windows and `tmux` everywhere else, picked automatically — see [Requirements](#-requirements).
 -   **🧹 Clean Terminal Behaviour**: Tmux runs as the terminal's own process, so leaving it closes the tab, and relaunching a terminal reattaches instead of leaving you in a bare shell.
--   **Intuitive UI**:
-    -   **Inline Icons**: Hover over any item to see common action icons for direct operations.
-    -   **Context Menu**: A full context menu provides access to all management features.
+
+![The create form and the settings page](./assets/screenshot-create-settings.png)
 
 ## 📋 Requirements
 
@@ -69,7 +67,7 @@ With no sessions running, the view offers a button to create the first one.
 
 ### Pane Actions
 -   **Attach**: Click the **▶** icon to the right of the pane item to switch to that pane.
--   **Split Pane**: Click the split icons to the right of the pane item to split it right or down. Both are also in the context menu.
+-   **Split Pane**: Click the split icon to the right of the pane item — the form lets you pick the direction (right, left, down or up), the working directory and what to run.
 -   **Close**: Right-click the pane and select "Kill Pane".
 
 ## 🎒 Development

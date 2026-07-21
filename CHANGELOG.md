@@ -17,8 +17,21 @@ at version 0.2.0; everything below is relative to that.
   [psmux](https://github.com/psmux/psmux), a native tmux-compatible multiplexer.
   The choice follows the platform the extension host runs on, so a WSL, SSH or
   container remote still uses `tmux` on that machine.
-- Two separate **Split Right** and **Split Down** buttons on panes, replacing the
-  single button that opened a direction picker.
+- **A create form** for sessions, windows and splits: name, working directory
+  (project folders one click away, plus native browse), what to run, and create
+  buttons for both terminal locations. Panes split in all four directions.
+- **A program launcher** inside that form: shells, REPLs, AI tools (claude,
+  codex, gemini, aider — each with resume and model variants and a free model
+  field), git TUIs, or any command typed by hand. Only installed programs are
+  offered; duplicates are collapsed by the binary's canonical path, so python
+  and python3 pointing at one interpreter show once; `{default-shell}` resolves
+  to the shell tmux itself would start.
+- **A settings page** behind a gear on the view title: auto-refresh and its
+  interval, where new terminals open (VS Code default, editor area, or panel),
+  and the full program list — editable, reorderable, with installed-state dots
+  and a re-check button that picks up newly installed tools without reloading
+  VS Code. Everything lives in the `tmuxSidebar.*` configuration, so
+  settings.json editing works too.
 - A hint shown in the empty view when no sessions exist, with a button to create
   the first one.
 - A marketplace gallery icon.
@@ -35,6 +48,8 @@ at version 0.2.0; everything below is relative to that.
   than leaving a bare shell.
 - A missing `tmux`/`psmux` is reported with a single install command detected
   from the system's own package manager.
+- The single Toggle Auto Refresh menu entry, which didn't show the current
+  state, is replaced by the settings page.
 - The published package no longer ships TypeScript sources, source maps or build
   config, which took it from 324 KB to 17 KB.
 
