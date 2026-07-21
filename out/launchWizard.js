@@ -256,8 +256,17 @@ const state = {
   name: DATA.mode === 'session' ? DATA.suggestedName : '',
   cwd: DATA.defaultCwd || '',
   program: DATA.programs[0] || null,
-  command: DATA.programs[0] ? DATA.programs[0].command : ''
+  // Per program: the variant it is currently set to, and whatever was typed in
+  // its model box. Each program keeps its own, so its row still reads the way
+  // it was left after the selection moves elsewhere and back.
+  choice: {},
+  typed: {}
 };
+
+// What a program currently runs, and the label its row shows for it.
+function effective(p) {
+  return state.choice[p.label] || { label: p.label, command: p.command };
+}
 
 function dirIcon(dir) {
   const halves = { right: [8.3,3.05,5.15,9.9], left: [2.55,3.05,5.15,9.9], down: [2.55,8.3,10.9,4.65], up: [2.55,3.05,10.9,4.65] };
@@ -268,11 +277,9 @@ function dirIcon(dir) {
 }
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 
-function selectProgram(p) { state.program = p; state.command = p.command; render(); }
-function baseName(pth) { const m = String(pth).replace(/[\\\\/]+$/,'').split(/[\\\\/]/); return m[m.length-1] || pth; }
-
 function submit(location, direction) {
-  vscode.postMessage({ type:'create', name: state.name, cwd: state.cwd, command: state.command, location, direction });
+  const command = state.program ? effective(state.program).command : '';
+  vscode.postMessage({ type:'create', name: state.name, cwd: state.cwd, command, location, direction });
 }
 
 function render() {
@@ -318,21 +325,55 @@ function render() {
     const selected = state.program && state.program.label === p.label;
     const item = el('div','item' + (selected ? ' sel' : ''));
     item.appendChild(el('span','dot ' + (selected ? 'on' : 'off')));
-    item.appendChild(el('span', null, p.label));
-    item.onclick = () => selectProgram(p);
+    // The row reads as whatever this program is set to run — bash becomes sh,
+    // claude becomes claude --resume — so the choice is visible in the list.
+    const rowLabel = el('span', null, effective(p).label);
+    item.appendChild(rowLabel);
+    item.onclick = () => { state.program = p; render(); };
     list.appendChild(item);
+
     if (selected && (p.variants || p.custom)) {
       const box = el('div','variants');
+      const rendered = [];
       (p.variants || []).forEach(v => {
-        const vi = el('div','variant' + (state.command === v.command ? ' sel' : ''), v.label || '(default shell)');
-        vi.onclick = () => { state.command = v.command; render(); };
+        const vi = el('div','variant', v.label);
+        vi.onclick = () => {
+          delete state.typed[p.label];
+          state.choice[p.label] = { label: v.label, command: v.command };
+          render();
+        };
         box.appendChild(vi);
+        rendered.push({ node: vi, command: v.command });
       });
+
+      // Reflect the current choice without rebuilding the box, which would
+      // steal focus from the model field mid-typing.
+      const paint = () => {
+        const current = effective(p).command;
+        rendered.forEach(r => r.node.classList.toggle('sel', r.command === current));
+        rowLabel.textContent = effective(p).label;
+      };
+
       if (p.custom) {
-        const ci = el('input'); ci.type='text'; ci.placeholder = p.custom.hint;
-        ci.oninput = () => { state.command = ci.value.trim() ? p.custom.prefix + ' "' + ci.value.trim() + '"' : p.command; };
+        const ci = el('input'); ci.type = 'text'; ci.placeholder = p.custom.hint;
+        ci.value = state.typed[p.label] || '';
+        ci.oninput = () => {
+          state.typed[p.label] = ci.value;
+          const value = ci.value.trim();
+          // Typing a model takes over from the picked variant, so its highlight
+          // clears and the row follows.
+          if (value) {
+            const command = p.custom.prefix + ' "' + value + '"';
+            state.choice[p.label] = { label: command, command };
+          } else {
+            delete state.choice[p.label];
+          }
+          paint();
+        };
         box.appendChild(ci);
       }
+
+      paint();
       list.appendChild(box);
     }
   });
