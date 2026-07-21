@@ -168,8 +168,10 @@ function html() {
   button.act.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
   button.act.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
   button.small { padding: 3px 9px; font-size: .92em; }
-  button.icon { padding: 3px 8px; }
+  button.icon { padding: 3px 8px; min-width: 28px; height: 24px; justify-content: center; }
   button.icon:disabled { opacity: .4; cursor: default; }
+  button.icon svg { display: block; }
+  button.tri { font-size: .72em; }
   .footer { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; position: sticky; bottom: 0; padding: 10px 0;
             background: var(--vscode-editor-background, var(--vscode-panel-background)); border-top: 1px solid var(--vscode-panel-border); }
   .flash { color: var(--vscode-terminal-ansiGreen, #3fb950); font-size: .92em; }
@@ -187,6 +189,24 @@ let defaultShell = '';
 let probeTimer = null;
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+// The webview has no codicon font, so the delete control is an inline trash
+// glyph drawn with currentColor; the move controls are plain triangles.
+const TRASH = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">'
+  + '<path d="M2.5 4h11"/><path d="M6 4V2.8c0-.4.3-.8.8-.8h2.4c.5 0 .8.4.8.8V4"/>'
+  + '<path d="M4 4l.7 9c.05.6.5 1 1.1 1h4.4c.6 0 1.05-.4 1.1-1L12 4"/><path d="M6.5 7v4.5M9.5 7v4.5"/></svg>';
+
+function iconBtn(html, title) {
+  const b = el('button', 'act secondary icon');
+  b.innerHTML = html;
+  b.title = title;
+  return b;
+}
+function triBtn(up, title) {
+  const b = el('button', 'act secondary icon tri', up ? '▲' : '▼');
+  b.title = title;
+  return b;
+}
 function binOf(command) { return command.trim().split(/\\s+/)[0] || ''; }
 function shellName() { const parts = defaultShell.split(/[\\\\/]/); return parts[parts.length - 1] || defaultShell; }
 
@@ -265,11 +285,11 @@ function programCard(p, index) {
   head.appendChild(dot(false));
   head.appendChild(el('span', 'name'));
   head.appendChild(el('span', 'status'));
-  const up = el('button', 'act secondary icon', '↑'); up.disabled = index === 0;
+  const up = triBtn(true, 'Move group up'); up.disabled = index === 0;
   up.onclick = () => { if (move(model.programs, index, -1)) { markDirty(); render(); } };
-  const down = el('button', 'act secondary icon', '↓'); down.disabled = index === model.programs.length - 1;
+  const down = triBtn(false, 'Move group down'); down.disabled = index === model.programs.length - 1;
   down.onclick = () => { if (move(model.programs, index, 1)) { markDirty(); render(); } };
-  const remove = el('button', 'act secondary small', 'Remove');
+  const remove = iconBtn(TRASH, 'Delete group');
   remove.onclick = () => { model.programs.splice(index, 1); markDirty(); render(); };
   head.appendChild(up); head.appendChild(down); head.appendChild(remove);
   card.appendChild(head);
@@ -281,11 +301,11 @@ function programCard(p, index) {
     cmd.value = c;
     cmd.oninput = () => { p.commands[ci] = cmd.value; markDirty(); paintDots(); scheduleProbe(); };
     row.appendChild(cmd);
-    const cup = el('button', 'act secondary icon', '↑'); cup.disabled = ci === 0;
+    const cup = triBtn(true, 'Move up'); cup.disabled = ci === 0;
     cup.onclick = () => { if (move(p.commands, ci, -1)) { markDirty(); render(); } };
-    const cdown = el('button', 'act secondary icon', '↓'); cdown.disabled = ci === p.commands.length - 1;
+    const cdown = triBtn(false, 'Move down'); cdown.disabled = ci === p.commands.length - 1;
     cdown.onclick = () => { if (move(p.commands, ci, 1)) { markDirty(); render(); } };
-    const del = el('button', 'act secondary icon', '−');
+    const del = iconBtn(TRASH, 'Delete command');
     del.onclick = () => { p.commands.splice(ci, 1); markDirty(); render(); };
     row.appendChild(cup); row.appendChild(cdown); row.appendChild(del);
     card.appendChild(row);
