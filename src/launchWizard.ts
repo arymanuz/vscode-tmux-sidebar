@@ -199,7 +199,9 @@ interface Payload {
     suggestedName: string;
     folders: { name: string; path: string }[];
     defaultCwd: string;
-    programs: ProgramData[];
+    // null while the installed programs are still being resolved — the form is
+    // shown immediately and this arrives over a message.
+    programs: ProgramData[] | null;
     preferred: 'editor' | 'panel';
 }
 
@@ -274,10 +276,11 @@ function html(payload: Payload): string {
 <script nonce="${n}">
 const vscode = acquireVsCodeApi();
 const DATA = ${data};
+let focused = false;
 const state = {
   name: DATA.mode === 'session' ? DATA.suggestedName : '',
   cwd: DATA.defaultCwd || '',
-  program: DATA.programs[0] || null,
+  program: null,
   // Per program: the variant it is currently set to, and whatever was typed in
   // its model box. Each program keeps its own, so its row still reads the way
   // it was left after the selection moves elsewhere and back.
@@ -311,6 +314,26 @@ function submit(location, direction) {
   vscode.postMessage({ type:'create', name: state.name, cwd: state.cwd, command, location, direction });
 }
 
+// The create buttons — drawn even while the program list is still resolving, so
+// the fast path stays available immediately.
+function renderActions(root) {
+  const actions = el('div', DATA.mode === 'split' ? 'actions split-actions' : 'actions');
+  if (DATA.mode === 'split') {
+    [['right','Split right'],['left','Split left'],['down','Split down'],['up','Split up']].forEach(([d,label]) => {
+      const b = el('button','act secondary', dirIcon(d) + '<span>'+label+'</span>'); b.onclick = () => submit(undefined, d); actions.appendChild(b);
+    });
+  } else if (DATA.mode === 'window') {
+    const b = el('button','act','Create window'); b.onclick = () => submit(); actions.appendChild(b);
+  } else {
+    const editor = el('button','act' + (DATA.preferred === 'editor' ? '' : ' secondary'), 'Create in editor area'); editor.onclick = () => submit('editor');
+    const panel = el('button','act' + (DATA.preferred === 'panel' ? '' : ' secondary'), 'Create in panel'); panel.onclick = () => submit('panel');
+    if (DATA.preferred === 'editor') { actions.append(editor, panel); } else { actions.append(panel, editor); }
+  }
+  root.appendChild(actions);
+
+  const cancel = el('button','link','Cancel'); cancel.onclick = () => vscode.postMessage({ type:'cancel' }); root.appendChild(cancel);
+}
+
 function render() {
   const root = document.getElementById('form');
   root.innerHTML = '';
@@ -319,14 +342,16 @@ function render() {
   if (DATA.mode !== 'split') {
     const f = el('div','field');
     f.appendChild(el('label', null, 'Name'));
-    const inp = el('input'); inp.type='text'; inp.value = state.name;
+    const inp = el('input'); inp.type='text'; inp.id='name'; inp.value = state.name;
     inp.placeholder = DATA.mode === 'session' ? DATA.suggestedName : 'optional';
     inp.oninput = () => { state.name = inp.value; };
     inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); primary(); } };
     f.appendChild(inp);
     const err = el('div','error'); err.id='err'; f.appendChild(err);
     root.appendChild(f);
-    setTimeout(() => { inp.focus(); inp.select(); }, 0);
+    // Only on the first paint — later ones (the program list arriving) must not
+    // grab the caret back or reselect what is being typed.
+    if (!focused) { focused = true; setTimeout(() => { inp.focus(); inp.select(); }, 0); }
   }
 
   // Working directory
@@ -349,6 +374,12 @@ function render() {
   // Run
   const run = el('div','field');
   run.appendChild(el('label', null, 'Run'));
+  if (!DATA.programs) {
+    run.appendChild(el('div','hint','Detecting installed programs…'));
+    root.appendChild(run);
+    renderActions(root);
+    return;
+  }
   const list = el('div','list');
   DATA.programs.forEach(p => {
     const selected = state.program && state.program.label === p.label;
@@ -409,22 +440,7 @@ function render() {
   run.appendChild(list);
   root.appendChild(run);
 
-  // Actions
-  const actions = el('div', DATA.mode === 'split' ? 'actions split-actions' : 'actions');
-  if (DATA.mode === 'split') {
-    [['right','Split right'],['left','Split left'],['down','Split down'],['up','Split up']].forEach(([d,label]) => {
-      const b = el('button','act secondary', dirIcon(d) + '<span>'+label+'</span>'); b.onclick = () => submit(undefined, d); actions.appendChild(b);
-    });
-  } else if (DATA.mode === 'window') {
-    const b = el('button','act','Create window'); b.onclick = () => submit(); actions.appendChild(b);
-  } else {
-    const editor = el('button','act' + (DATA.preferred === 'editor' ? '' : ' secondary'), 'Create in editor area'); editor.onclick = () => submit('editor');
-    const panel = el('button','act' + (DATA.preferred === 'panel' ? '' : ' secondary'), 'Create in panel'); panel.onclick = () => submit('panel');
-    if (DATA.preferred === 'editor') { actions.append(editor, panel); } else { actions.append(panel, editor); }
-  }
-  root.appendChild(actions);
-
-  const cancel = el('button','link','Cancel'); cancel.onclick = () => vscode.postMessage({ type:'cancel' }); root.appendChild(cancel);
+  renderActions(root);
 }
 
 // The default action for Enter: the preferred create location, or the first split.
@@ -438,6 +454,19 @@ window.addEventListener('message', e => {
   const m = e.data;
   if (m.type === 'browsed') { state.cwd = m.path; render(); }
   else if (m.type === 'error') { const err = document.getElementById('err'); if (err) err.textContent = m.message; }
+  else if (m.type === 'programs') {
+    DATA.programs = m.programs || [];
+    if (!state.program) { state.program = DATA.programs[0] || null; }
+    // The list can land mid-word, so put the caret back exactly where it was.
+    const before = document.getElementById('name');
+    const typing = before && document.activeElement === before;
+    const caret = typing ? before.selectionStart : null;
+    render();
+    if (typing) {
+      const after = document.getElementById('name');
+      if (after) { after.focus(); const at = caret === null ? after.value.length : caret; after.setSelectionRange(at, at); }
+    }
+  }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') vscode.postMessage({ type:'cancel' }); });
 render();
@@ -453,12 +482,14 @@ export async function runLaunchWizard(
     validate?: NameValidator
 ): Promise<LaunchChoice | undefined> {
     const folders = (vscode.workspace.workspaceFolders ?? []).map(f => ({ name: f.name, path: f.uri.fsPath }));
+    // Show the form at once and fill the program list in when it resolves —
+    // waiting for it first left the "+" looking unresponsive on a cold start.
     const payload: Payload = {
         mode,
         suggestedName: suggestedName ?? '',
         folders,
         defaultCwd: folders[0]?.path ?? '',
-        programs: await buildPrograms(),
+        programs: null,
         preferred: defaultTerminalLocation()
     };
 
@@ -476,6 +507,12 @@ export async function runLaunchWizard(
         // Set while the native folder dialog is up, so the panel losing sight of
         // itself for that isn't read as the user walking away.
         let busy = false;
+
+        void buildPrograms().then(programs => {
+            if (!settled) {
+                panel.webview.postMessage({ type: 'programs', programs });
+            }
+        });
         const finish = (choice: LaunchChoice | undefined) => {
             if (settled) {
                 return;
