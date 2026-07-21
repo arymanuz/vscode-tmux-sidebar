@@ -9,55 +9,43 @@ export class TmuxSessionProvider implements vscode.TreeDataProvider<TmuxTreeItem
     private _onDidChangeTreeData: vscode.EventEmitter<TmuxTreeItem | undefined | null | void> = new vscode.EventEmitter<TmuxTreeItem | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<TmuxTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
     private autoRefreshInterval: NodeJS.Timeout | undefined;
-    private autoRefreshEnabled: boolean = false;
-    private readonly AUTO_REFRESH_INTERVAL = 3000; // 3 seconds
+    private readonly configListener: vscode.Disposable;
 
     constructor(private tmuxService: TmuxService, private extensionPath: string) {
-        // Start auto refresh by default
-        this.startAutoRefresh();
+        this.applyAutoRefreshSettings();
+        // The settings page (or settings.json) is where auto refresh is
+        // controlled; the timer follows the configuration.
+        this.configListener = vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('tmuxSidebar.autoRefresh')) {
+                this.applyAutoRefreshSettings();
+            }
+        });
     }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
     }
 
-    startAutoRefresh(): void {
-        if (this.autoRefreshInterval) {
-            return; // Already running
-        }
-        
-        this.autoRefreshEnabled = true;
-        this.autoRefreshInterval = setInterval(() => {
-            if (this.autoRefreshEnabled) {
-                this.refresh();
-            }
-        }, this.AUTO_REFRESH_INTERVAL);
-    }
-
-    stopAutoRefresh(): void {
-        this.autoRefreshEnabled = false;
+    private applyAutoRefreshSettings(): void {
         if (this.autoRefreshInterval) {
             clearInterval(this.autoRefreshInterval);
             this.autoRefreshInterval = undefined;
         }
-    }
 
-    toggleAutoRefresh(): void {
-        if (this.autoRefreshEnabled) {
-            this.stopAutoRefresh();
-            vscode.window.showInformationMessage('Auto-refresh disabled');
-        } else {
-            this.startAutoRefresh();
-            vscode.window.showInformationMessage('Auto-refresh enabled');
+        const config = vscode.workspace.getConfiguration('tmuxSidebar.autoRefresh');
+        if (!config.get<boolean>('enabled', true)) {
+            return;
         }
-    }
-
-    isAutoRefreshEnabled(): boolean {
-        return this.autoRefreshEnabled;
+        const seconds = Math.max(1, config.get<number>('intervalSeconds', 3));
+        this.autoRefreshInterval = setInterval(() => this.refresh(), seconds * 1000);
     }
 
     dispose(): void {
-        this.stopAutoRefresh();
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+            this.autoRefreshInterval = undefined;
+        }
+        this.configListener.dispose();
     }
 
     getTreeItem(element: TmuxTreeItem): vscode.TreeItem {

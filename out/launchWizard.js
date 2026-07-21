@@ -33,152 +33,20 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.warmUpPrograms = warmUpPrograms;
 exports.runLaunchWizard = runLaunchWizard;
 const vscode = __importStar(require("vscode"));
-const cp = __importStar(require("child_process"));
-const util = __importStar(require("util"));
-const exec = util.promisify(cp.exec);
-const ALT_SHELLS = ['zsh', 'fish', 'sh', 'nu', 'ksh', 'dash'];
-const ALT_REPLS = ['node', 'ipython', 'irb', 'ghci', 'deno', 'bun'];
-const CLAUDE_MODELS = ['opus', 'sonnet', 'haiku', 'fable'];
-const GEMINI_MODELS = ['auto', 'pro', 'flash', 'flash-lite'];
-const availability = new Map();
-async function isInstalled(bin) {
-    const cached = availability.get(bin);
-    if (cached !== undefined) {
-        return cached;
-    }
-    const probe = process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`;
-    let found;
-    try {
-        await exec(probe);
-        found = true;
-    }
-    catch {
-        found = false;
-    }
-    availability.set(bin, found);
-    return found;
-}
-// Every binary the form can offer. Probing these one at a time meant ~25
-// sequential process spawns, which is what made the first open slow.
-const PROGRAM_BINS = ['bash', 'python3', 'python', 'claude', 'codex', 'gemini', 'agy', 'aider', 'opencode', 'goose', 'crush', 'lazygit', 'tig', 'gitui'];
-const ALL_BINS = [...PROGRAM_BINS, ...ALT_SHELLS, ...ALT_REPLS];
+const programs_1 = require("./programs");
 /**
- * Resolve every binary at once. On Unix that is a single shell that reports
- * which ones exist, rather than one process per binary; Windows has no cheap
- * equivalent, so the individual checks run concurrently there. Results are
- * cached, so this costs nothing after the first call.
+ * Where a new terminal opens. The extension's own setting decides: "editor" and
+ * "panel" are fixed choices, while "vscode" defers to VS Code's
+ * terminal.integrated.defaultLocation — read here, at form-open time, so a
+ * change to either setting is picked up by the next "+".
  */
-async function probeAll() {
-    const missing = ALL_BINS.filter(bin => !availability.has(bin));
-    if (missing.length === 0) {
-        return;
+function preferredLocation() {
+    const own = vscode.workspace.getConfiguration('tmuxSidebar').get('newTerminalLocation');
+    if (own === 'editor' || own === 'panel') {
+        return own;
     }
-    const individually = async () => {
-        await Promise.all(missing.map(async (bin) => {
-            availability.set(bin, await isInstalled(bin));
-        }));
-    };
-    if (process.platform === 'win32') {
-        await individually();
-        return;
-    }
-    // The names come from the constants above, so nothing user-supplied is
-    // interpolated. The trailing `true` keeps a missing last entry from making
-    // the whole script exit non-zero.
-    const script = `${missing.map(bin => `command -v ${bin} >/dev/null 2>&1 && echo ${bin}`).join('; ')}; true`;
-    try {
-        const { stdout } = await exec(script);
-        const found = new Set(stdout.split('\n').map(line => line.trim()).filter(Boolean));
-        for (const bin of missing) {
-            availability.set(bin, found.has(bin));
-        }
-    }
-    catch {
-        await individually();
-    }
-}
-/** Warm the cache in the background so the first form open is instant. */
-function warmUpPrograms() {
-    void probeAll();
-}
-async function firstInstalled(bins) {
-    for (const bin of bins) {
-        if (await isInstalled(bin)) {
-            return bin;
-        }
-    }
-    return undefined;
-}
-async function installedFrom(bins) {
-    const found = [];
-    for (const bin of bins) {
-        if (await isInstalled(bin)) {
-            found.push(bin);
-        }
-    }
-    return found;
-}
-const variants = (commands) => commands.map(command => ({ label: command, command }));
-// Each program's plain command and, where it has them, the variants to list and
-// whether a typed value (a model name) applies. Flags are the doc-verified set.
-async function buildPrograms() {
-    await probeAll();
-    const out = [];
-    const bash = await firstInstalled(['bash']);
-    if (bash) {
-        const shells = await installedFrom(ALT_SHELLS);
-        out.push({
-            label: 'bash',
-            command: '',
-            // First entry reverts to the session's default shell (empty command).
-            variants: [{ label: 'bash', command: '' }, ...variants(shells)],
-            custom: null
-        });
-    }
-    const python = await firstInstalled(['python3', 'python']);
-    if (python) {
-        const repls = await installedFrom(ALT_REPLS);
-        out.push({ label: python, command: python, variants: [{ label: python, command: python }, ...variants(repls)], custom: null });
-    }
-    const claude = await firstInstalled(['claude']);
-    if (claude) {
-        out.push({
-            label: 'claude',
-            command: claude,
-            variants: variants([claude, `${claude} --resume`, `${claude} --resume --fork-session`, ...CLAUDE_MODELS.map(m => `${claude} --model ${m}`)]),
-            custom: { prefix: `${claude} --model`, hint: 'Claude model — an alias like sonnet, or a full id' }
-        });
-    }
-    const codex = await firstInstalled(['codex']);
-    if (codex) {
-        out.push({ label: 'codex', command: codex, variants: variants([codex, `${codex} resume`]), custom: { prefix: `${codex} -m`, hint: 'Codex model name' } });
-    }
-    const gemini = await firstInstalled(['gemini']);
-    if (gemini) {
-        // gemini's --resume loads the most recent session rather than a picker,
-        // so it is left out; the -m aliases are verified.
-        out.push({ label: 'gemini', command: gemini, variants: variants([gemini, ...GEMINI_MODELS.map(m => `${gemini} -m ${m}`)]), custom: { prefix: `${gemini} -m`, hint: 'Gemini model name' } });
-    }
-    const agy = await firstInstalled(['agy']);
-    if (agy) {
-        // Antigravity (gemini's successor): --model takes a full model name.
-        out.push({ label: 'agy', command: agy, variants: variants([agy]), custom: { prefix: `${agy} --model`, hint: 'Antigravity model, e.g. Gemini 3 Pro' } });
-    }
-    const aider = await firstInstalled(['aider']);
-    if (aider) {
-        out.push({ label: 'aider', command: aider, variants: variants([aider, `${aider} --restore-chat-history`]), custom: { prefix: `${aider} --model`, hint: 'Aider model, e.g. anthropic/claude-sonnet-5' } });
-    }
-    for (const bin of ['opencode', 'goose', 'crush', 'lazygit', 'tig', 'gitui']) {
-        if (await isInstalled(bin)) {
-            out.push({ label: bin, command: bin, variants: null, custom: null });
-        }
-    }
-    return out;
-}
-function defaultTerminalLocation() {
     const configured = vscode.workspace.getConfiguration('terminal.integrated').get('defaultLocation');
     return configured === 'editor' ? 'editor' : 'panel';
 }
@@ -460,7 +328,7 @@ async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
         folders,
         defaultCwd: folders[0]?.path ?? '',
         programs: null,
-        preferred: defaultTerminalLocation()
+        preferred: preferredLocation()
     };
     const panel = vscode.window.createWebviewPanel('tmuxSidebarCreate', mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [extensionUri] });
     panel.iconPath = vscode.Uri.joinPath(extensionUri, 'resources', 'icon.svg');
@@ -470,7 +338,7 @@ async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
         // Set while the native folder dialog is up, so the panel losing sight of
         // itself for that isn't read as the user walking away.
         let busy = false;
-        void buildPrograms().then(programs => {
+        void (0, programs_1.resolvePrograms)((0, programs_1.getProgramSpecs)()).then(programs => {
             if (!settled) {
                 panel.webview.postMessage({ type: 'programs', programs });
             }

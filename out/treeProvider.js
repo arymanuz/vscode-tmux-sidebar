@@ -41,47 +41,36 @@ class TmuxSessionProvider {
         this.extensionPath = extensionPath;
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
-        this.autoRefreshEnabled = false;
-        this.AUTO_REFRESH_INTERVAL = 3000; // 3 seconds
-        // Start auto refresh by default
-        this.startAutoRefresh();
+        this.applyAutoRefreshSettings();
+        // The settings page (or settings.json) is where auto refresh is
+        // controlled; the timer follows the configuration.
+        this.configListener = vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('tmuxSidebar.autoRefresh')) {
+                this.applyAutoRefreshSettings();
+            }
+        });
     }
     refresh() {
         this._onDidChangeTreeData.fire();
     }
-    startAutoRefresh() {
-        if (this.autoRefreshInterval) {
-            return; // Already running
-        }
-        this.autoRefreshEnabled = true;
-        this.autoRefreshInterval = setInterval(() => {
-            if (this.autoRefreshEnabled) {
-                this.refresh();
-            }
-        }, this.AUTO_REFRESH_INTERVAL);
-    }
-    stopAutoRefresh() {
-        this.autoRefreshEnabled = false;
+    applyAutoRefreshSettings() {
         if (this.autoRefreshInterval) {
             clearInterval(this.autoRefreshInterval);
             this.autoRefreshInterval = undefined;
         }
-    }
-    toggleAutoRefresh() {
-        if (this.autoRefreshEnabled) {
-            this.stopAutoRefresh();
-            vscode.window.showInformationMessage('Auto-refresh disabled');
+        const config = vscode.workspace.getConfiguration('tmuxSidebar.autoRefresh');
+        if (!config.get('enabled', true)) {
+            return;
         }
-        else {
-            this.startAutoRefresh();
-            vscode.window.showInformationMessage('Auto-refresh enabled');
-        }
-    }
-    isAutoRefreshEnabled() {
-        return this.autoRefreshEnabled;
+        const seconds = Math.max(1, config.get('intervalSeconds', 3));
+        this.autoRefreshInterval = setInterval(() => this.refresh(), seconds * 1000);
     }
     dispose() {
-        this.stopAutoRefresh();
+        if (this.autoRefreshInterval) {
+            clearInterval(this.autoRefreshInterval);
+            this.autoRefreshInterval = undefined;
+        }
+        this.configListener.dispose();
     }
     getTreeItem(element) {
         return element;

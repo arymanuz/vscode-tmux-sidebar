@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import { TmuxSessionProvider, TmuxSessionTreeItem, TmuxWindowTreeItem, TmuxPaneTreeItem } from './treeProvider';
 import { TmuxService, TMUX_BIN } from './tmuxService';
-import { runLaunchWizard, warmUpPrograms } from './launchWizard';
+import { runLaunchWizard } from './launchWizard';
+import { warmUpPrograms } from './programs';
+import { openSettingsPanel } from './settingsPanel';
 
 // Create a terminal that attaches to a tmux/psmux session, making the
 // multiplexer the terminal's main process so that exiting it closes the tab
@@ -151,8 +153,8 @@ export function activate(context: vscode.ExtensionContext) {
         tmuxSessionProvider.refresh();
     });
 
-    const toggleAutoRefreshCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.toggleAutoRefresh', () => {
-        tmuxSessionProvider.toggleAutoRefresh();
+    const settingsCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.settings', () => {
+        openSettingsPanel(context.extensionUri);
     });
 
     const renameCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.rename', async (item: TmuxSessionTreeItem) => {
@@ -384,7 +386,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         attachCommand,
         refreshCommand,
-        toggleAutoRefreshCommand,
+        settingsCommand,
         renameCommand,
         renameWindowCommand,
         newCommand,

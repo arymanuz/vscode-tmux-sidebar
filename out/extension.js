@@ -39,6 +39,8 @@ const vscode = __importStar(require("vscode"));
 const treeProvider_1 = require("./treeProvider");
 const tmuxService_1 = require("./tmuxService");
 const launchWizard_1 = require("./launchWizard");
+const programs_1 = require("./programs");
+const settingsPanel_1 = require("./settingsPanel");
 // Create a terminal that attaches to a tmux/psmux session, making the
 // multiplexer the terminal's main process so that exiting it closes the tab
 // (instead of dropping back into a shell).
@@ -77,7 +79,7 @@ function activate(context) {
     vscode.window.registerTreeDataProvider('vscode-tmux-sidebar', tmuxSessionProvider);
     // Resolve which programs exist while the user is still reading the tree, so
     // opening the create form doesn't wait on it.
-    (0, launchWizard_1.warmUpPrograms)();
+    (0, programs_1.warmUpPrograms)();
     const attachCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.attach', async (item) => {
         if (!item) {
             vscode.window.showErrorMessage('No item selected for attach');
@@ -175,8 +177,8 @@ function activate(context) {
         await tmuxService.getTmuxTreeFresh();
         tmuxSessionProvider.refresh();
     });
-    const toggleAutoRefreshCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.toggleAutoRefresh', () => {
-        tmuxSessionProvider.toggleAutoRefresh();
+    const settingsCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.settings', () => {
+        (0, settingsPanel_1.openSettingsPanel)(context.extensionUri);
     });
     const renameCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.rename', async (item) => {
         if (!item || !item.session || !item.session.name) {
@@ -361,7 +363,7 @@ function activate(context) {
             // Error is already shown by the service
         }
     });
-    context.subscriptions.push(attachCommand, refreshCommand, toggleAutoRefreshCommand, renameCommand, renameWindowCommand, newCommand, deleteCommand, killWindowCommand, killPaneCommand, newWindowCommand, splitPaneCommand, inlineNewWindowCommand, tmuxSessionProvider // Add provider to dispose auto-refresh on deactivation
+    context.subscriptions.push(attachCommand, refreshCommand, settingsCommand, renameCommand, renameWindowCommand, newCommand, deleteCommand, killWindowCommand, killPaneCommand, newWindowCommand, splitPaneCommand, inlineNewWindowCommand, tmuxSessionProvider // Add provider to dispose auto-refresh on deactivation
     );
 }
 function deactivate() { }

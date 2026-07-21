@@ -68,10 +68,10 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "vscode-tmux-sidebar.toggleAutoRefresh",
-        "title": "Toggle Auto Refresh",
+        "command": "vscode-tmux-sidebar.settings",
+        "title": "Tmux Sidebar Settings",
         "category": "Tmux",
-        "icon": "$(sync)"
+        "icon": "$(gear)"
       },
       {
         "command": "vscode-tmux-sidebar.rename",
@@ -135,9 +135,9 @@
           "group": "navigation"
         },
         {
-          "command": "vscode-tmux-sidebar.toggleAutoRefresh",
+          "command": "vscode-tmux-sidebar.settings",
           "when": "view == vscode-tmux-sidebar",
-          "group": "1_settings"
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -192,6 +192,278 @@
           "group": "2_destructive"
         }
       ]
+    },
+    "configuration": {
+      "title": "Tmux Sidebar",
+      "properties": {
+        "tmuxSidebar.autoRefresh.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refresh the session tree automatically."
+        },
+        "tmuxSidebar.autoRefresh.intervalSeconds": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "How often the session tree refreshes, in seconds."
+        },
+        "tmuxSidebar.newTerminalLocation": {
+          "type": "string",
+          "enum": [
+            "vscode",
+            "editor",
+            "panel"
+          ],
+          "default": "vscode",
+          "enumDescriptions": [
+            "Follow VS Code's terminal.integrated.defaultLocation, read each time a session is created",
+            "Always the editor area",
+            "Always the bottom panel"
+          ],
+          "description": "Which create button is offered first (and used by Enter) in the New Session form."
+        },
+        "tmuxSidebar.programs": {
+          "type": "array",
+          "default": [
+            {
+              "bins": [
+                "bash"
+              ],
+              "command": "",
+              "variants": [
+                {
+                  "command": "zsh",
+                  "bin": "zsh"
+                },
+                {
+                  "command": "fish",
+                  "bin": "fish"
+                },
+                {
+                  "command": "sh",
+                  "bin": "sh"
+                },
+                {
+                  "command": "nu",
+                  "bin": "nu"
+                },
+                {
+                  "command": "ksh",
+                  "bin": "ksh"
+                },
+                {
+                  "command": "dash",
+                  "bin": "dash"
+                }
+              ]
+            },
+            {
+              "bins": [
+                "python3",
+                "python"
+              ],
+              "variants": [
+                {
+                  "command": "node",
+                  "bin": "node"
+                },
+                {
+                  "command": "ipython",
+                  "bin": "ipython"
+                },
+                {
+                  "command": "irb",
+                  "bin": "irb"
+                },
+                {
+                  "command": "ghci",
+                  "bin": "ghci"
+                },
+                {
+                  "command": "deno",
+                  "bin": "deno"
+                },
+                {
+                  "command": "bun",
+                  "bin": "bun"
+                }
+              ]
+            },
+            {
+              "bins": [
+                "claude"
+              ],
+              "variants": [
+                {
+                  "command": "{bin} --resume"
+                },
+                {
+                  "command": "{bin} --resume --fork-session"
+                },
+                {
+                  "command": "{bin} --model opus"
+                },
+                {
+                  "command": "{bin} --model sonnet"
+                },
+                {
+                  "command": "{bin} --model haiku"
+                },
+                {
+                  "command": "{bin} --model fable"
+                }
+              ],
+              "custom": {
+                "prefix": "{bin} --model",
+                "hint": "Claude model — an alias like sonnet, or a full id"
+              }
+            },
+            {
+              "bins": [
+                "codex"
+              ],
+              "variants": [
+                {
+                  "command": "{bin} resume"
+                }
+              ],
+              "custom": {
+                "prefix": "{bin} -m",
+                "hint": "Codex model name"
+              }
+            },
+            {
+              "bins": [
+                "gemini"
+              ],
+              "variants": [
+                {
+                  "command": "{bin} -m auto"
+                },
+                {
+                  "command": "{bin} -m pro"
+                },
+                {
+                  "command": "{bin} -m flash"
+                },
+                {
+                  "command": "{bin} -m flash-lite"
+                }
+              ],
+              "custom": {
+                "prefix": "{bin} -m",
+                "hint": "Gemini model name"
+              }
+            },
+            {
+              "bins": [
+                "agy"
+              ],
+              "custom": {
+                "prefix": "{bin} --model",
+                "hint": "Antigravity model, e.g. Gemini 3 Pro"
+              }
+            },
+            {
+              "bins": [
+                "aider"
+              ],
+              "variants": [
+                {
+                  "command": "{bin} --restore-chat-history"
+                }
+              ],
+              "custom": {
+                "prefix": "{bin} --model",
+                "hint": "Aider model, e.g. anthropic/claude-sonnet-5"
+              }
+            },
+            {
+              "bins": [
+                "opencode"
+              ]
+            },
+            {
+              "bins": [
+                "goose"
+              ]
+            },
+            {
+              "bins": [
+                "crush"
+              ]
+            },
+            {
+              "bins": [
+                "lazygit"
+              ]
+            },
+            {
+              "bins": [
+                "tig"
+              ]
+            },
+            {
+              "bins": [
+                "gitui"
+              ]
+            }
+          ],
+          "markdownDescription": "Programs offered by the create form. Each entry: `bins` — binaries probed in order, the first installed one is used (the group is hidden when none is); `label` — row name, defaults to the resolved binary; `command` — what runs when picked plain, `{bin}` is replaced by the resolved binary, empty string starts tmux's default shell, omitted means `{bin}`; `variants` — alternative commands (`bin` on a variant shows it only when that binary is installed); `custom` — a free-text model field appended to `prefix`. Edit comfortably via the Tmux Sidebar settings page.",
+          "items": {
+            "type": "object",
+            "required": [
+              "bins"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "bins": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "command": {
+                "type": "string"
+              },
+              "variants": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "command"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "string"
+                    },
+                    "bin": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "custom": {
+                "type": "object",
+                "required": [
+                  "prefix"
+                ],
+                "properties": {
+                  "prefix": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "scripts": {
