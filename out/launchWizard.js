@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.warmUpPrograms = warmUpPrograms;
 exports.runLaunchWizard = runLaunchWizard;
 const vscode = __importStar(require("vscode"));
 const cp = __importStar(require("child_process"));
@@ -60,6 +61,49 @@ async function isInstalled(bin) {
     availability.set(bin, found);
     return found;
 }
+// Every binary the form can offer. Probing these one at a time meant ~25
+// sequential process spawns, which is what made the first open slow.
+const PROGRAM_BINS = ['bash', 'python3', 'python', 'claude', 'codex', 'gemini', 'agy', 'aider', 'opencode', 'goose', 'crush', 'lazygit', 'tig', 'gitui'];
+const ALL_BINS = [...PROGRAM_BINS, ...ALT_SHELLS, ...ALT_REPLS];
+/**
+ * Resolve every binary at once. On Unix that is a single shell that reports
+ * which ones exist, rather than one process per binary; Windows has no cheap
+ * equivalent, so the individual checks run concurrently there. Results are
+ * cached, so this costs nothing after the first call.
+ */
+async function probeAll() {
+    const missing = ALL_BINS.filter(bin => !availability.has(bin));
+    if (missing.length === 0) {
+        return;
+    }
+    const individually = async () => {
+        await Promise.all(missing.map(async (bin) => {
+            availability.set(bin, await isInstalled(bin));
+        }));
+    };
+    if (process.platform === 'win32') {
+        await individually();
+        return;
+    }
+    // The names come from the constants above, so nothing user-supplied is
+    // interpolated. The trailing `true` keeps a missing last entry from making
+    // the whole script exit non-zero.
+    const script = `${missing.map(bin => `command -v ${bin} >/dev/null 2>&1 && echo ${bin}`).join('; ')}; true`;
+    try {
+        const { stdout } = await exec(script);
+        const found = new Set(stdout.split('\n').map(line => line.trim()).filter(Boolean));
+        for (const bin of missing) {
+            availability.set(bin, found.has(bin));
+        }
+    }
+    catch {
+        await individually();
+    }
+}
+/** Warm the cache in the background so the first form open is instant. */
+function warmUpPrograms() {
+    void probeAll();
+}
 async function firstInstalled(bins) {
     for (const bin of bins) {
         if (await isInstalled(bin)) {
@@ -81,6 +125,7 @@ const variants = (commands) => commands.map(command => ({ label: command, comman
 // Each program's plain command and, where it has them, the variants to list and
 // whether a typed value (a model name) applies. Flags are the doc-verified set.
 async function buildPrograms() {
+    await probeAll();
     const out = [];
     const bash = await firstInstalled(['bash']);
     if (bash) {
@@ -152,10 +197,15 @@ function html(payload) {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${n}';">
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 22px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); }
-  .form { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
-  h1 { font-size: 1.3em; font-weight: 600; margin: 0; }
-  .field { display: flex; flex-direction: column; gap: 6px; }
+  /* The page never scrolls: the program list takes the slack and scrolls on its
+     own, so the Create buttons stay on screen on any monitor. */
+  html, body { height: 100%; }
+  body { margin: 0; padding: 14px 16px; overflow: hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); }
+  .form { max-width: 560px; height: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  h1 { font-size: 1.15em; font-weight: 600; margin: 0; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field.grow { flex: 1 1 auto; min-height: 0; }
+  .field.grow .list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .field > label { font-weight: 600; }
   input[type=text] {
     width: 100%; padding: 6px 8px; color: var(--vscode-input-foreground);
@@ -170,9 +220,9 @@ function html(payload) {
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border: 1px solid transparent;
   }
   .chip:hover { outline: 1px solid var(--vscode-focusBorder); }
-  .list { display: flex; flex-direction: column; gap: 3px; }
+  .list { display: flex; flex-direction: column; gap: 2px; }
   .item {
-    display: flex; align-items: center; gap: 9px; padding: 6px 9px; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer;
     background: var(--vscode-list-inactiveSelectionBackground, transparent); border: 1px solid transparent;
   }
   .item:hover { background: var(--vscode-list-hoverBackground); }
@@ -184,9 +234,9 @@ function html(payload) {
   .variant { padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: var(--vscode-editor-font-family, monospace); font-size: 0.92em; }
   .variant:hover { background: var(--vscode-list-hoverBackground); }
   .variant.sel { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
   button.act {
-    display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border: none; border-radius: 4px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border: none; border-radius: 4px; cursor: pointer;
     font-size: 1em; color: var(--vscode-button-foreground); background: var(--vscode-button-background);
   }
   button.act:hover { background: var(--vscode-button-hoverBackground); }
@@ -262,8 +312,8 @@ function render() {
   }
   root.appendChild(wd);
 
-  // Run
-  const run = el('div','field');
+  // Run — this block absorbs the leftover height and scrolls internally.
+  const run = el('div','field grow');
   run.appendChild(el('label', null, 'Run'));
   const list = el('div','list');
   DATA.programs.forEach(p => {
@@ -342,6 +392,9 @@ async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
     panel.webview.html = html(payload);
     return new Promise(resolve => {
         let settled = false;
+        // Set while the native folder dialog is up, so the panel losing sight of
+        // itself for that isn't read as the user walking away.
+        let busy = false;
         const finish = (choice) => {
             if (settled) {
                 return;
@@ -350,6 +403,13 @@ async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
             resolve(choice);
             panel.dispose();
         };
+        // Behave like the dialog it is: switching to another tab abandons it,
+        // rather than leaving a half-filled form parked in the editor.
+        panel.onDidChangeViewState(() => {
+            if (!panel.visible && !busy) {
+                finish(undefined);
+            }
+        });
         panel.webview.onDidReceiveMessage(async (msg) => {
             if (msg.type === 'create') {
                 const raw = typeof msg.name === 'string' ? msg.name.trim() : '';
@@ -376,15 +436,21 @@ async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
                 finish(undefined);
             }
             else if (msg.type === 'browse') {
-                const chosen = await vscode.window.showOpenDialog({
-                    canSelectFolders: true,
-                    canSelectFiles: false,
-                    canSelectMany: false,
-                    defaultUri: msg.cwd ? vscode.Uri.file(String(msg.cwd)) : undefined,
-                    openLabel: 'Use this folder'
-                });
-                if (chosen?.[0]) {
-                    panel.webview.postMessage({ type: 'browsed', path: chosen[0].fsPath });
+                busy = true;
+                try {
+                    const chosen = await vscode.window.showOpenDialog({
+                        canSelectFolders: true,
+                        canSelectFiles: false,
+                        canSelectMany: false,
+                        defaultUri: msg.cwd ? vscode.Uri.file(String(msg.cwd)) : undefined,
+                        openLabel: 'Use this folder'
+                    });
+                    if (chosen?.[0]) {
+                        panel.webview.postMessage({ type: 'browsed', path: chosen[0].fsPath });
+                    }
+                }
+                finally {
+                    busy = false;
                 }
             }
         });

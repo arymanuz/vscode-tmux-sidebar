@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { TmuxSessionProvider, TmuxSessionTreeItem, TmuxWindowTreeItem, TmuxPaneTreeItem } from './treeProvider';
 import { TmuxService, TMUX_BIN } from './tmuxService';
-import { runLaunchWizard } from './launchWizard';
+import { runLaunchWizard, warmUpPrograms } from './launchWizard';
 
 // Create a terminal that attaches to a tmux/psmux session, making the
 // multiplexer the terminal's main process so that exiting it closes the tab
@@ -48,6 +48,10 @@ export function activate(context: vscode.ExtensionContext) {
     const tmuxSessionProvider = new TmuxSessionProvider(tmuxService, context.extensionPath);
 
     vscode.window.registerTreeDataProvider('vscode-tmux-sidebar', tmuxSessionProvider);
+
+    // Resolve which programs exist while the user is still reading the tree, so
+    // opening the create form doesn't wait on it.
+    warmUpPrograms();
 
     const attachCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.attach', async (item: TmuxSessionTreeItem | TmuxWindowTreeItem | TmuxPaneTreeItem) => {
         if (!item) {

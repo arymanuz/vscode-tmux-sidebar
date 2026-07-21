@@ -75,6 +75,9 @@ function activate(context) {
     const tmuxService = new tmuxService_1.TmuxService();
     const tmuxSessionProvider = new treeProvider_1.TmuxSessionProvider(tmuxService, context.extensionPath);
     vscode.window.registerTreeDataProvider('vscode-tmux-sidebar', tmuxSessionProvider);
+    // Resolve which programs exist while the user is still reading the tree, so
+    // opening the create form doesn't wait on it.
+    (0, launchWizard_1.warmUpPrograms)();
     const attachCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.attach', async (item) => {
         if (!item) {
             vscode.window.showErrorMessage('No item selected for attach');
