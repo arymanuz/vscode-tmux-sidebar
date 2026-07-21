@@ -197,15 +197,13 @@ function html(payload) {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${n}';">
 <style>
   * { box-sizing: border-box; }
-  /* The page never scrolls: the program list takes the slack and scrolls on its
-     own, so the Create buttons stay on screen on any monitor. */
-  html, body { height: 100%; }
-  body { margin: 0; padding: 14px 16px; overflow: hidden; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); }
-  .form { max-width: 560px; height: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  /* Kept tight so it fits a normal screen in one go, but the page still scrolls
+     when it can't — a small window, an unusual number of installed tools or of
+     project roots. */
+  body { margin: 0; padding: 14px 16px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); }
+  .form { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   h1 { font-size: 1.15em; font-weight: 600; margin: 0; }
   .field { display: flex; flex-direction: column; gap: 4px; }
-  .field.grow { flex: 1 1 auto; min-height: 0; }
-  .field.grow .list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .field > label { font-weight: 600; }
   input[type=text] {
     width: 100%; padding: 6px 8px; color: var(--vscode-input-foreground);
@@ -312,8 +310,8 @@ function render() {
   }
   root.appendChild(wd);
 
-  // Run — this block absorbs the leftover height and scrolls internally.
-  const run = el('div','field grow');
+  // Run
+  const run = el('div','field');
   run.appendChild(el('label', null, 'Run'));
   const list = el('div','list');
   DATA.programs.forEach(p => {
