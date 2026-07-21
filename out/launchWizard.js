@@ -268,6 +268,13 @@ function effective(p) {
   return state.choice[p.label] || { label: p.label, command: p.command };
 }
 
+// A plain model name goes in as typed; only one the shell would misread — a
+// space, a quote, anything outside this set — gets quoted.
+function quoteModel(v) {
+  if (/^[A-Za-z0-9._:/@+-]+$/.test(v)) { return v; }
+  return "'" + v.split("'").join("'\\\\''") + "'";
+}
+
 function dirIcon(dir) {
   const halves = { right: [8.3,3.05,5.15,9.9], left: [2.55,3.05,5.15,9.9], down: [2.55,8.3,10.9,4.65], up: [2.55,3.05,10.9,4.65] };
   const [x,y,w,h] = halves[dir];
@@ -363,7 +370,7 @@ function render() {
           // Typing a model takes over from the picked variant, so its highlight
           // clears and the row follows.
           if (value) {
-            const command = p.custom.prefix + ' "' + value + '"';
+            const command = p.custom.prefix + ' ' + quoteModel(value);
             state.choice[p.label] = { label: command, command };
           } else {
             delete state.choice[p.label];
