@@ -42,8 +42,46 @@ export interface ProgramData {
 
 const asString = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
+// An entry written by the earlier model — bins with optional variants and a
+// {bin} placeholder — converted to a command list. Settings saved by that
+// model's page persist in the user's configuration, so they must keep working.
+function migrateLegacyEntry(e: Record<string, unknown>): string[] {
+    const bins = Array.isArray(e.bins)
+        ? e.bins.filter((b): b is string => typeof b === 'string' && b.trim() !== '').map(b => b.trim())
+        : [];
+    if (bins.length === 0) {
+        return [];
+    }
+    const first = bins[0];
+    const substLegacy = (s: string) => s.split('{bin}').join(first);
+
+    const commands: string[] = [];
+    const command = asString(e.command);
+    if (command === '') {
+        // An empty command meant "tmux's default shell", which is now the token;
+        // the binaries themselves stay as explicit entries after it.
+        commands.push(DEFAULT_SHELL_TOKEN, ...bins);
+    } else if (command === undefined || command === '{bin}') {
+        // Fallback binaries become plain entries — the new model's in-group
+        // fallback does the same job.
+        commands.push(...bins);
+    } else {
+        commands.push(substLegacy(command));
+    }
+    if (Array.isArray(e.variants)) {
+        for (const v of e.variants) {
+            const c = typeof v === 'object' && v !== null ? asString((v as Record<string, unknown>).command) : undefined;
+            if (c && c.trim() !== '') {
+                commands.push(substLegacy(c.trim()));
+            }
+        }
+    }
+    return commands;
+}
+
 // Configuration content is user-editable JSON, so nothing about its shape can
-// be assumed. Entries without any usable command are dropped.
+// be assumed. Entries without any usable command are dropped; entries in the
+// earlier bins/variants shape are migrated.
 export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
     if (!Array.isArray(raw)) {
         return [];
@@ -54,9 +92,17 @@ export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
             continue;
         }
         const e = entry as Record<string, unknown>;
-        const commands = Array.isArray(e.commands)
+        let commands = Array.isArray(e.commands)
             ? e.commands.filter((c): c is string => typeof c === 'string' && c.trim() !== '').map(c => c.trim())
             : [];
+        let legacyFirstBin: string | undefined;
+        if (commands.length === 0 && Array.isArray(e.bins)) {
+            commands = migrateLegacyEntry(e);
+            legacyFirstBin = commands.length > 0 ? asString((e.bins as unknown[])[0])?.trim() : undefined;
+        }
+        // Deduplicate here as well as at resolve time, so a migrated list
+        // doesn't carry doubles into the settings editor.
+        commands = [...new Set(commands)];
         if (commands.length === 0) {
             continue;
         }
@@ -64,8 +110,9 @@ export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
         if (typeof e.custom === 'object' && e.custom !== null) {
             const prefix = asString((e.custom as Record<string, unknown>).prefix);
             if (prefix && prefix.trim() !== '') {
+                const resolved = legacyFirstBin ? prefix.split('{bin}').join(legacyFirstBin) : prefix;
                 const hint = asString((e.custom as Record<string, unknown>).hint);
-                spec.custom = hint ? { prefix, hint } : { prefix };
+                spec.custom = hint ? { prefix: resolved, hint } : { prefix: resolved };
             }
         }
         specs.push(spec);
@@ -78,7 +125,13 @@ export function getProgramSpecs(): ProgramSpec[] {
     const inspected = config.inspect<unknown>('programs');
     const overridden = inspected !== undefined
         && (inspected.globalValue !== undefined || inspected.workspaceValue !== undefined || inspected.workspaceFolderValue !== undefined);
-    const specs = sanitizeSpecs(config.get<unknown>('programs'));
+    let specs = sanitizeSpecs(config.get<unknown>('programs'));
+
+    // An override so broken that nothing survives would leave the create form
+    // empty — fall back to the manifest default rather than offer nothing.
+    if (specs.length === 0) {
+        specs = sanitizeSpecs(inspected?.defaultValue);
+    }
 
     // The manifest default is written for Unix. On Windows, until the user has
     // saved their own list, the shell group additionally offers PowerShell and

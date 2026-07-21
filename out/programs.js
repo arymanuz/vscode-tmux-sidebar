@@ -58,8 +58,46 @@ const exec = util.promisify(cp.exec);
  */
 exports.DEFAULT_SHELL_TOKEN = '{default-shell}';
 const asString = (v) => (typeof v === 'string' ? v : undefined);
+// An entry written by the earlier model — bins with optional variants and a
+// {bin} placeholder — converted to a command list. Settings saved by that
+// model's page persist in the user's configuration, so they must keep working.
+function migrateLegacyEntry(e) {
+    const bins = Array.isArray(e.bins)
+        ? e.bins.filter((b) => typeof b === 'string' && b.trim() !== '').map(b => b.trim())
+        : [];
+    if (bins.length === 0) {
+        return [];
+    }
+    const first = bins[0];
+    const substLegacy = (s) => s.split('{bin}').join(first);
+    const commands = [];
+    const command = asString(e.command);
+    if (command === '') {
+        // An empty command meant "tmux's default shell", which is now the token;
+        // the binaries themselves stay as explicit entries after it.
+        commands.push(exports.DEFAULT_SHELL_TOKEN, ...bins);
+    }
+    else if (command === undefined || command === '{bin}') {
+        // Fallback binaries become plain entries — the new model's in-group
+        // fallback does the same job.
+        commands.push(...bins);
+    }
+    else {
+        commands.push(substLegacy(command));
+    }
+    if (Array.isArray(e.variants)) {
+        for (const v of e.variants) {
+            const c = typeof v === 'object' && v !== null ? asString(v.command) : undefined;
+            if (c && c.trim() !== '') {
+                commands.push(substLegacy(c.trim()));
+            }
+        }
+    }
+    return commands;
+}
 // Configuration content is user-editable JSON, so nothing about its shape can
-// be assumed. Entries without any usable command are dropped.
+// be assumed. Entries without any usable command are dropped; entries in the
+// earlier bins/variants shape are migrated.
 function sanitizeSpecs(raw) {
     if (!Array.isArray(raw)) {
         return [];
@@ -70,9 +108,17 @@ function sanitizeSpecs(raw) {
             continue;
         }
         const e = entry;
-        const commands = Array.isArray(e.commands)
+        let commands = Array.isArray(e.commands)
             ? e.commands.filter((c) => typeof c === 'string' && c.trim() !== '').map(c => c.trim())
             : [];
+        let legacyFirstBin;
+        if (commands.length === 0 && Array.isArray(e.bins)) {
+            commands = migrateLegacyEntry(e);
+            legacyFirstBin = commands.length > 0 ? asString(e.bins[0])?.trim() : undefined;
+        }
+        // Deduplicate here as well as at resolve time, so a migrated list
+        // doesn't carry doubles into the settings editor.
+        commands = [...new Set(commands)];
         if (commands.length === 0) {
             continue;
         }
@@ -80,8 +126,9 @@ function sanitizeSpecs(raw) {
         if (typeof e.custom === 'object' && e.custom !== null) {
             const prefix = asString(e.custom.prefix);
             if (prefix && prefix.trim() !== '') {
+                const resolved = legacyFirstBin ? prefix.split('{bin}').join(legacyFirstBin) : prefix;
                 const hint = asString(e.custom.hint);
-                spec.custom = hint ? { prefix, hint } : { prefix };
+                spec.custom = hint ? { prefix: resolved, hint } : { prefix: resolved };
             }
         }
         specs.push(spec);
@@ -93,7 +140,12 @@ function getProgramSpecs() {
     const inspected = config.inspect('programs');
     const overridden = inspected !== undefined
         && (inspected.globalValue !== undefined || inspected.workspaceValue !== undefined || inspected.workspaceFolderValue !== undefined);
-    const specs = sanitizeSpecs(config.get('programs'));
+    let specs = sanitizeSpecs(config.get('programs'));
+    // An override so broken that nothing survives would leave the create form
+    // empty — fall back to the manifest default rather than offer nothing.
+    if (specs.length === 0) {
+        specs = sanitizeSpecs(inspected?.defaultValue);
+    }
     // The manifest default is written for Unix. On Windows, until the user has
     // saved their own list, the shell group additionally offers PowerShell and
     // cmd right after the default shell — declared here rather than as
