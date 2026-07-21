@@ -100,6 +100,7 @@ function html(payload: Payload): string {
   button.act.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
   button.act svg { width: 16px; height: 16px; }
   .split-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  input.manual { font-family: var(--vscode-editor-font-family, monospace); }
   .link { background: none; border: none; color: var(--vscode-textLink-foreground); cursor: pointer; padding: 0; font-size: 0.95em; align-self: flex-start; }
   .error { color: var(--vscode-inputValidation-errorForeground, #f14c4c); min-height: 1.1em; font-size: 0.92em; }
   .hint { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
@@ -119,7 +120,9 @@ const state = {
   // its model box. Each program keeps its own, so its row still reads the way
   // it was left after the selection moves elsewhere and back.
   choice: {},
-  typed: {}
+  typed: {},
+  // A hand-typed command that overrides the program selection entirely.
+  manual: ''
 };
 
 // What a program currently runs, and the label its row shows for it.
@@ -144,7 +147,8 @@ function dirIcon(dir) {
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 
 function submit(location, direction) {
-  const command = state.program ? effective(state.program).command : '';
+  const manual = state.manual.trim();
+  const command = manual ? manual : (state.program ? effective(state.program).command : '');
   vscode.postMessage({ type:'create', name: state.name, cwd: state.cwd, command, location, direction });
 }
 
@@ -208,22 +212,46 @@ function render() {
   // Run
   const run = el('div','field');
   run.appendChild(el('label', null, 'Run'));
+
+  // The free command field sits after the groups: typing there overrides the
+  // selection, clearing it hands control back. Present even while the list is
+  // still resolving, and mirrored by syncRun without re-rendering so typing in
+  // it never loses focus.
+  const programNodes = [];
+  const manualInput = el('input','manual');
+  manualInput.type = 'text';
+  manualInput.placeholder = 'custom command — runs instead of the selection';
+  manualInput.value = state.manual;
+  const syncRun = () => {
+    const manualActive = state.manual.trim() !== '';
+    for (const node of programNodes) {
+      const on = !manualActive && state.program === node.p;
+      node.item.classList.toggle('sel', on);
+      node.dotEl.className = 'dot ' + (on ? 'on' : 'off');
+    }
+  };
+  manualInput.oninput = () => { state.manual = manualInput.value; syncRun(); };
+  manualInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); primary(); } };
+
   if (!DATA.programs) {
     run.appendChild(el('div','hint','Detecting installed programs…'));
+    run.appendChild(manualInput);
     root.appendChild(run);
     renderActions(root);
     return;
   }
   const list = el('div','list');
   DATA.programs.forEach(p => {
-    const selected = state.program && state.program.label === p.label;
+    const selected = state.program && state.program.label === p.label && !state.manual.trim();
     const item = el('div','item' + (selected ? ' sel' : ''));
-    item.appendChild(el('span','dot ' + (selected ? 'on' : 'off')));
+    const dotEl = el('span','dot ' + (selected ? 'on' : 'off'));
+    item.appendChild(dotEl);
     // The row reads as whatever this program is set to run — bash becomes sh,
     // claude becomes claude --resume — so the choice is visible in the list.
     const rowLabel = el('span', null, effective(p).label);
     item.appendChild(rowLabel);
-    item.onclick = () => { state.program = p; render(); };
+    item.onclick = () => { state.manual = ''; state.program = p; render(); };
+    programNodes.push({ item, dotEl, p });
     list.appendChild(item);
 
     if (selected && (p.variants || p.custom)) {
@@ -234,6 +262,7 @@ function render() {
         vi.onclick = () => {
           delete state.typed[p.label];
           state.choice[p.label] = { label: v.label, command: v.command };
+          state.manual = '';
           render();
         };
         box.appendChild(vi);
@@ -252,6 +281,9 @@ function render() {
         const ci = el('input'); ci.type = 'text'; ci.placeholder = p.custom.hint;
         ci.value = state.typed[p.label] || '';
         ci.oninput = () => {
+          state.manual = '';
+          manualInput.value = '';
+          syncRun();
           state.typed[p.label] = ci.value;
           const value = ci.value.trim();
           // Typing a model takes over from the picked variant, so its highlight
@@ -272,6 +304,7 @@ function render() {
     }
   });
   run.appendChild(list);
+  run.appendChild(manualInput);
   root.appendChild(run);
 
   renderActions(root);
