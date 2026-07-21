@@ -51,9 +51,15 @@ const SPLIT_FLAGS = {
     up: '-v -b'
 };
 // Commands are run through a shell, so anything interpolated into them has to
-// be quoted. Single quotes disable every expansion; an embedded single quote is
-// closed, escaped and reopened.
+// be quoted. On Unix single quotes disable every expansion; an embedded single
+// quote is closed, escaped and reopened. On Windows exec goes through cmd.exe,
+// where single quotes are ordinary characters — there it's double quotes, an
+// embedded quote doubled (the rule psmux's own argument parser follows), and a
+// trailing backslash doubled so it can't swallow the closing quote.
 function shellQuote(value) {
+    if (process.platform === 'win32') {
+        return `"${value.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`;
+    }
     return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 function launchArgs(options) {

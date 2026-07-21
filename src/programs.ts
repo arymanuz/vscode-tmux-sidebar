@@ -123,8 +123,6 @@ export function sanitizeSpecs(raw: unknown): ProgramSpec[] {
 export function getProgramSpecs(): ProgramSpec[] {
     const config = vscode.workspace.getConfiguration('tmuxSidebar');
     const inspected = config.inspect<unknown>('programs');
-    const overridden = inspected !== undefined
-        && (inspected.globalValue !== undefined || inspected.workspaceValue !== undefined || inspected.workspaceFolderValue !== undefined);
     let specs = sanitizeSpecs(config.get<unknown>('programs'));
 
     // An override so broken that nothing survives would leave the create form
@@ -133,16 +131,24 @@ export function getProgramSpecs(): ProgramSpec[] {
         specs = sanitizeSpecs(inspected?.defaultValue);
     }
 
-    // The manifest default is written for Unix. On Windows, until the user has
-    // saved their own list, the shell group additionally offers PowerShell and
-    // cmd right after the default shell — declared here rather than as
-    // platform toggles in the configuration.
-    if (!overridden && process.platform === 'win32') {
-        for (const spec of specs) {
-            const at = spec.commands.indexOf(DEFAULT_SHELL_TOKEN);
-            if (at !== -1) {
-                spec.commands.splice(at + 1, 0, 'powershell', 'cmd');
-                break;
+    // The manifest default is written for Unix, and a list saved from a WSL or
+    // SSH window lands in the same user settings a local Windows window reads.
+    // So on Windows the list is completed rather than trusted: unless some
+    // Windows shell is already mentioned anywhere, PowerShell and cmd go right
+    // after the default-shell token. A list that names any of them is left
+    // alone — that one was authored with Windows in mind.
+    if (process.platform === 'win32') {
+        const winShells = new Set(['powershell', 'pwsh', 'cmd']);
+        const mentioned = specs.some(spec => spec.commands.some(
+            c => winShells.has(binOf(c).toLowerCase().replace(/\.exe$/, ''))
+        ));
+        if (!mentioned) {
+            for (const spec of specs) {
+                const at = spec.commands.indexOf(DEFAULT_SHELL_TOKEN);
+                if (at !== -1) {
+                    spec.commands.splice(at + 1, 0, 'powershell', 'cmd');
+                    break;
+                }
             }
         }
     }
