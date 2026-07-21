@@ -166,13 +166,36 @@ function binOf(command) {
     return command.trim().split(/\s+/)[0] ?? '';
 }
 // --- Availability ----------------------------------------------------------
+// Per binary: its canonical (symlink-resolved) path, or false when absent.
+// The canonical path is what deduplication compares, so python and python3
+// pointing at the same interpreter collapse into one entry.
 const availability = new Map();
 let defaultShell;
-async function probeOne(bin) {
-    const probe = process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`;
+let defaultShellReal;
+const shq = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+/** Resolve symlinks; the input path is returned when realpath can't. */
+async function realpathOf(p) {
+    if (process.platform === 'win32' || !p) {
+        return p;
+    }
     try {
-        await exec(probe);
-        return true;
+        const { stdout } = await exec(`realpath ${shq(p)} 2>/dev/null`);
+        return stdout.trim() || p;
+    }
+    catch {
+        return p;
+    }
+}
+async function probeOne(bin) {
+    try {
+        if (process.platform === 'win32') {
+            const { stdout } = await exec(`where ${bin}`);
+            const first = stdout.split('\n')[0]?.trim();
+            return first || false;
+        }
+        const { stdout } = await exec(`command -v ${bin}`);
+        const p = stdout.trim();
+        return p ? await realpathOf(p) : false;
     }
     catch {
         return false;
@@ -183,8 +206,9 @@ async function probeOne(bin) {
 const SAFE_BIN = /^[A-Za-z0-9._+-]+$/;
 /**
  * Resolve the given binaries against the cache, probing the missing ones. On
- * Unix the missing ones are checked in a single shell pass rather than one
- * process each; Windows has no cheap equivalent, so they run concurrently.
+ * Unix the missing ones are checked in a single shell pass that also resolves
+ * each hit to its canonical path; Windows has no cheap equivalent, so they run
+ * concurrently. The value per binary is its canonical path, or false.
  */
 async function probeBins(bins) {
     const unique = [...new Set(bins.map(b => b.trim()).filter(Boolean))];
@@ -200,12 +224,24 @@ async function probeBins(bins) {
             }));
         }
         else {
-            const script = `${toProbe.map(bin => `command -v ${bin} >/dev/null 2>&1 && echo ${bin}`).join('; ')}; true`;
+            const script = `${toProbe
+                .map(bin => `p=$(command -v ${bin} 2>/dev/null) && echo "${bin}=$(realpath "$p" 2>/dev/null || echo "$p")"`)
+                .join('; ')}; true`;
             try {
                 const { stdout } = await exec(script);
-                const found = new Set(stdout.split('\n').map(line => line.trim()).filter(Boolean));
+                const found = new Map();
+                for (const line of stdout.split('\n')) {
+                    const at = line.indexOf('=');
+                    if (at > 0) {
+                        const name = line.slice(0, at).trim();
+                        const p = line.slice(at + 1).trim();
+                        if (name && p) {
+                            found.set(name, p);
+                        }
+                    }
+                }
                 for (const bin of toProbe) {
-                    availability.set(bin, found.has(bin));
+                    availability.set(bin, found.get(bin) ?? false);
                 }
             }
             catch {
@@ -246,10 +282,18 @@ async function getDefaultShell() {
     defaultShell = shell;
     return shell;
 }
+/** The default shell's canonical path — the dedup key for {default-shell}. */
+async function getDefaultShellReal() {
+    if (defaultShellReal === undefined) {
+        defaultShellReal = await realpathOf(await getDefaultShell());
+    }
+    return defaultShellReal;
+}
 /** Forget every probe result, so the next check hits the system again. */
 function resetAvailability() {
     availability.clear();
     defaultShell = undefined;
+    defaultShellReal = undefined;
 }
 /** Every binary a spec list mentions (the default-shell token has none). */
 function allBins(specs) {
@@ -273,30 +317,44 @@ function warmUpPrograms() {
  * Turn the configured specs into what the create form shows. Per group: the
  * default-shell token resolves to the concrete shell tmux would start (shown
  * by name, launched by full path, never probed); every other command is kept
- * only when its binary is installed. Duplicates by visible label are dropped —
- * so when the default shell IS bash, the explicit bash entry disappears. The
- * first surviving command fronts the group; a group where nothing survives is
+ * only when its binary is installed. Duplicates are dropped by canonical
+ * identity — the binary's symlink-resolved path plus the arguments — so when
+ * python and python3 are the same interpreter, or the default shell IS bash,
+ * the double disappears; visible-label duplicates are dropped too. The first
+ * surviving command fronts the group; a group where nothing survives is
  * hidden.
  */
 async function resolvePrograms(specs) {
     const installed = await probeBins(allBins(specs));
     const shell = await getDefaultShell();
     const shellLabel = path.basename(shell);
+    const shellReal = await getDefaultShellReal();
     const out = [];
     for (const spec of specs) {
         const variants = [];
         const seen = new Set();
+        const seenLabels = new Set();
         for (const command of spec.commands) {
-            const variant = command === exports.DEFAULT_SHELL_TOKEN
-                ? { label: shellLabel, command: shell }
-                : { label: command, command };
-            if (command !== exports.DEFAULT_SHELL_TOKEN && !installed[binOf(command)]) {
+            let variant;
+            let key;
+            if (command === exports.DEFAULT_SHELL_TOKEN) {
+                variant = { label: shellLabel, command: shell };
+                key = shellReal;
+            }
+            else {
+                const real = installed[binOf(command)];
+                if (!real) {
+                    continue;
+                }
+                const args = command.trim().slice(binOf(command).length).trim();
+                variant = { label: command, command };
+                key = args ? `${real} ${args}` : real;
+            }
+            if (seen.has(key) || seenLabels.has(variant.label)) {
                 continue;
             }
-            if (seen.has(variant.label)) {
-                continue;
-            }
-            seen.add(variant.label);
+            seen.add(key);
+            seenLabels.add(variant.label);
             variants.push(variant);
         }
         if (variants.length === 0) {

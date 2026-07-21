@@ -259,7 +259,9 @@ function paintDots() {
     if (!p || p.commands[ci] === undefined) return;
     const c = p.commands[ci].trim();
     node.className = 'dot ' + (commandInstalled(c) ? 'on' : 'miss');
-    node.title = c === TOKEN ? 'resolves to ' + defaultShell : (commandInstalled(c) ? 'installed' : 'not installed');
+    // availability values are canonical paths, so the tooltip can say exactly
+    // which binary a command resolves to.
+    node.title = c === TOKEN ? 'resolves to ' + defaultShell : (availability[binOf(c)] || 'not installed');
   });
 }
 
