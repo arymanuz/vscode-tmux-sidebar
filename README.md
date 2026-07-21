@@ -37,7 +37,7 @@ for your system.
 The extension is not published to the VS Code Marketplace yet, so install it from
 a `.vsix` file:
 
-1.  Download the latest `.vsix` from the [Releases page](https://github.com/arymanuz/vscode-tmux-sidebar/releases), or build one yourself (see [Development](#-development)).
+1.  Download the latest `.vsix` from the [Releases page](https://github.com/arymanuz/vscode-tmux-sidebar/releases), or build one from source with [`vsce package`](https://code.visualstudio.com/api/working-with-extensions/publishing-extension).
 2.  In VS Code, open the Extensions view (`Ctrl+Shift+X`).
 3.  Click the `...` (More Actions) button at the top of the view.
 4.  Select **Install from VSIX...** and choose the file.
@@ -69,29 +69,6 @@ With no sessions running, the view offers a button to create the first one.
 -   **Attach**: Click the **▶** icon to the right of the pane item to switch to that pane.
 -   **Split Pane**: Click the split icon to the right of the pane item — the form lets you pick the direction (right, left, down or up), the working directory and what to run.
 -   **Close**: Right-click the pane and select "Kill Pane".
-
-## 🎒 Development
-
-```shell
-npm install          # install dependencies
-npm run compile      # build src/ into out/
-npm run watch        # rebuild on change
-```
-
-Press `F5` to launch a second VS Code window with the extension loaded.
-
-To build an installable package:
-
-```shell
-npm install -g @vscode/vsce
-vsce package
-```
-
-The gallery icon is generated from its SVG source and is not drawn by hand:
-
-```shell
-rsvg-convert -w 128 -h 128 -o resources/icon-gallery.png resources/icon-gallery.svg
-```
 
 ## 🙏 Credits
 
