@@ -144,25 +144,10 @@ function getProgramSpecs() {
     if (specs.length === 0) {
         specs = sanitizeSpecs(inspected?.defaultValue);
     }
-    // The manifest default is written for Unix, and a list saved from a WSL or
-    // SSH window lands in the same user settings a local Windows window reads.
-    // So on Windows the list is completed rather than trusted: unless some
-    // Windows shell is already mentioned anywhere, PowerShell and cmd go right
-    // after the default-shell token. A list that names any of them is left
-    // alone — that one was authored with Windows in mind.
-    if (process.platform === 'win32') {
-        const winShells = new Set(['powershell', 'pwsh', 'cmd']);
-        const mentioned = specs.some(spec => spec.commands.some(c => winShells.has(binOf(c).toLowerCase().replace(/\.exe$/, ''))));
-        if (!mentioned) {
-            for (const spec of specs) {
-                const at = spec.commands.indexOf(exports.DEFAULT_SHELL_TOKEN);
-                if (at !== -1) {
-                    spec.commands.splice(at + 1, 0, 'powershell', 'cmd');
-                    break;
-                }
-            }
-        }
-    }
+    // The default lists shells for every platform — powershell and cmd next
+    // to the Unix ones. User settings are shared between a Windows window and
+    // its WSL/SSH remotes, so one list serves them all: whatever isn't
+    // installed on the machine at hand is simply not offered.
     return specs;
 }
 /** The binary a command starts with — what existence is checked against. */
