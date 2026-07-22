@@ -42,12 +42,23 @@ function createAttachTerminal(
     // replays creationOptions when a terminal is relaunched or a persisted
     // session is restored, but it does not replay sendText — which would leave
     // a bare shell behind.
+    //
+    // The attach is guarded by has-session: a bad session name or a missing
+    // tmux would otherwise exit instantly and take the tab with it before the
+    // error can be read. The guard script is POSIX, so it runs under an
+    // explicit `sh` — the login shell itself may be fish.
+    const target = shellQuote(sessionName);
+    const failureNote = shellQuote(
+        `Could not attach: session ${sessionName} not found, or ${TMUX_BIN} is not on PATH.`
+    );
+    const guarded = `${TMUX_BIN} has-session -t ${target} 2>/dev/null && exec ${TMUX_BIN} attach -t ${target}; `
+        + `echo ${failureNote}; echo 'Press Enter to close this terminal.'; read -r _`;
     return vscode.window.createTerminal({
         name: terminalName,
         iconPath,
         location,
         shellPath: process.env.SHELL || '/bin/bash',
-        shellArgs: ['-lc', `exec ${TMUX_BIN} attach -t ${shellQuote(sessionName)}`]
+        shellArgs: ['-lc', `exec sh -c ${shellQuote(guarded)}`]
     });
 }
 
