@@ -36,6 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
 const treeProvider_1 = require("./treeProvider");
 const tmuxService_1 = require("./tmuxService");
 const launchWizard_1 = require("./launchWizard");
@@ -52,6 +54,26 @@ function createAttachTerminal(context, terminalName, sessionName, location) {
         light: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-light.svg'),
         dark: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-dark.svg')
     };
+    // Without an explicit cwd VS Code starts the terminal process in the
+    // workspace root — and if that directory is currently absent (an
+    // unmounted volume, say), the process cannot even spawn, so the tab dies
+    // before tmux is involved at all. The directory itself is irrelevant here
+    // (tmux panes carry their own); what matters is that it exists.
+    let cwd;
+    for (const candidate of [vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, os.homedir()]) {
+        try {
+            if (candidate && fs.existsSync(candidate)) {
+                cwd = candidate;
+                break;
+            }
+        }
+        catch {
+            // inaccessible — try the next one
+        }
+    }
+    if (cwd === undefined && process.platform !== 'win32') {
+        cwd = '/';
+    }
     if (process.platform === 'win32') {
         // psmux is a native binary and doesn't rely on a shell to set up the
         // environment, so run it directly as the terminal process.
@@ -59,6 +81,7 @@ function createAttachTerminal(context, terminalName, sessionName, location) {
             name: terminalName,
             iconPath,
             location,
+            cwd,
             shellPath: tmuxService_1.TMUX_BIN,
             shellArgs: ['attach', '-t', sessionName]
         });
@@ -84,6 +107,7 @@ function createAttachTerminal(context, terminalName, sessionName, location) {
         name: terminalName,
         iconPath,
         location,
+        cwd,
         shellPath: process.env.SHELL || '/bin/bash',
         shellArgs: ['-lc', `exec sh -c ${(0, tmuxService_1.shellQuote)(guarded)}`]
     });

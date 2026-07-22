@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as os from 'os';
 import { TmuxSessionProvider, TmuxSessionTreeItem, TmuxWindowTreeItem, TmuxPaneTreeItem } from './treeProvider';
 import { TmuxService, TMUX_BIN, shellQuote } from './tmuxService';
 import { runLaunchWizard } from './launchWizard';
@@ -22,6 +24,26 @@ function createAttachTerminal(
         dark: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-dark.svg')
     };
 
+    // Without an explicit cwd VS Code starts the terminal process in the
+    // workspace root — and if that directory is currently absent (an
+    // unmounted volume, say), the process cannot even spawn, so the tab dies
+    // before tmux is involved at all. The directory itself is irrelevant here
+    // (tmux panes carry their own); what matters is that it exists.
+    let cwd: string | undefined;
+    for (const candidate of [vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, os.homedir()]) {
+        try {
+            if (candidate && fs.existsSync(candidate)) {
+                cwd = candidate;
+                break;
+            }
+        } catch {
+            // inaccessible — try the next one
+        }
+    }
+    if (cwd === undefined && process.platform !== 'win32') {
+        cwd = '/';
+    }
+
     if (process.platform === 'win32') {
         // psmux is a native binary and doesn't rely on a shell to set up the
         // environment, so run it directly as the terminal process.
@@ -29,6 +51,7 @@ function createAttachTerminal(
             name: terminalName,
             iconPath,
             location,
+            cwd,
             shellPath: TMUX_BIN,
             shellArgs: ['attach', '-t', sessionName]
         });
@@ -57,6 +80,7 @@ function createAttachTerminal(
         name: terminalName,
         iconPath,
         location,
+        cwd,
         shellPath: process.env.SHELL || '/bin/bash',
         shellArgs: ['-lc', `exec sh -c ${shellQuote(guarded)}`]
     });
