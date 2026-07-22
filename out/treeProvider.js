@@ -41,6 +41,7 @@ class TmuxSessionProvider {
         this.extensionPath = extensionPath;
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+        this.visible = true;
         this.applyAutoRefreshSettings();
         // The settings page (or settings.json) is where auto refresh is
         // controlled; the timer follows the configuration.
@@ -53,13 +54,25 @@ class TmuxSessionProvider {
     refresh() {
         this._onDidChangeTreeData.fire();
     }
+    // The auto-refresh timer only runs while the view is on screen — polling
+    // tmux every few seconds behind a hidden panel is pure waste.
+    setVisible(visible) {
+        if (this.visible === visible) {
+            return;
+        }
+        this.visible = visible;
+        this.applyAutoRefreshSettings();
+        if (visible) {
+            this.refresh();
+        }
+    }
     applyAutoRefreshSettings() {
         if (this.autoRefreshInterval) {
             clearInterval(this.autoRefreshInterval);
             this.autoRefreshInterval = undefined;
         }
         const config = vscode.workspace.getConfiguration('tmuxSidebar.autoRefresh');
-        if (!config.get('enabled', true)) {
+        if (!this.visible || !config.get('enabled', true)) {
             return;
         }
         const seconds = Math.max(1, config.get('intervalSeconds', 3));
@@ -87,23 +100,14 @@ class TmuxSessionProvider {
                 if (!element.window || !element.window.panes) {
                     return [];
                 }
-                // Need to find the session to check if it's attached
-                const sessions = await this.tmuxService.getTmuxTree();
-                const session = sessions.find(s => s.name === element.window.sessionName);
-                const sessionAttached = session?.isAttached || false;
-                return element.window.panes.map(pane => new TmuxPaneTreeItem(pane, this.extensionPath, sessionAttached, element.window.isActive));
+                return element.window.panes.map(pane => new TmuxPaneTreeItem(pane, this.extensionPath, element.sessionAttached, element.window.isActive));
             }
             return [];
         }
+        // With no sessions the tree must be genuinely empty: only then does
+        // VS Code show the viewsWelcome content with its New Session button.
         const sessions = await this.tmuxService.getTmuxTree();
-        if (sessions.length > 0) {
-            return sessions.map(session => new TmuxSessionTreeItem(session));
-        }
-        else {
-            const item = new vscode.TreeItem('No running tmux sessions found.', vscode.TreeItemCollapsibleState.None);
-            // This is a bit of a hack to make it fit the type, but it's a leaf node so it's fine.
-            return [item];
-        }
+        return sessions.map(session => new TmuxSessionTreeItem(session));
     }
 }
 exports.TmuxSessionProvider = TmuxSessionProvider;
@@ -138,6 +142,7 @@ class TmuxWindowTreeItem extends vscode.TreeItem {
         const label = `${window.index}:${window.name}`;
         super(label, vscode.TreeItemCollapsibleState.Expanded);
         this.window = window;
+        this.sessionAttached = sessionAttached;
         this.contextValue = 'tmuxWindow';
         this.iconPath = new vscode.ThemeIcon('window');
         // Use description and icon color to show status

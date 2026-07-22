@@ -30,8 +30,10 @@ at version 0.2.0; everything below is relative to that.
   interval, where new terminals open (VS Code default, editor area, or panel),
   and the full program list — editable, reorderable, with installed-state dots
   and a re-check button that picks up newly installed tools without reloading
-  VS Code. Everything lives in the `tmuxSidebar.*` configuration, so
-  settings.json editing works too.
+  VS Code. Tabs switch between editing the global settings and this
+  workspace's own; saving globally clears the workspace overrides so the saved
+  values apply everywhere. Everything lives in the `tmuxSidebar.*`
+  configuration, so settings.json editing works too.
 - A hint shown in the empty view when no sessions exist, with a button to create
   the first one.
 - A marketplace gallery icon.
@@ -48,6 +50,8 @@ at version 0.2.0; everything below is relative to that.
   than leaving a bare shell.
 - A missing `tmux`/`psmux` is reported with a single install command detected
   from the system's own package manager.
+- Routine successes (created, killed, switched, attached) show briefly in the
+  status bar instead of stacking notification popups; failures stay loud.
 - The single Toggle Auto Refresh menu entry, which didn't show the current
   state, is replaced by the settings page.
 - The published package no longer ships TypeScript sources, source maps or build

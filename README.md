@@ -14,7 +14,7 @@ Easily manage your Tmux sessions, windows, and panes in the VS Code sidebar.
     -   **Smart Terminal Reuse**: Reuses the terminal already attached to a session instead of opening another one.
 -   **📝 Create Form**: One form for new sessions, windows and splits — name, working directory, and what to run, with big create buttons at the end. Panes split in all four directions (right, left, down, up).
 -   **🚀 Program Launcher**: Start a pane straight into what you need: your shell, a Python/Node REPL, AI tools (claude, codex, gemini, aider — with resume and model variants), lazygit and friends, or any command you type. Only what is actually installed is offered, and `{default-shell}` resolves to the shell tmux itself would start. The whole list is yours to edit on the settings page.
--   **⚙️ Settings Page**: Auto-refresh with its interval, where new terminals open (VS Code default / editor area / panel), and the full program list — with installed-state dots, a re-check button, and reordering.
+-   **⚙️ Settings Page**: Auto-refresh with its interval, where new terminals open (VS Code default / editor area / panel), and the full program list — with installed-state dots, a re-check button, and reordering. Settings are edited globally or per-workspace, switched by tabs.
 -   **🪟 Windows Support**: Uses [psmux](https://github.com/psmux/psmux) on Windows and `tmux` everywhere else, picked automatically — see [Requirements](#-requirements).
 -   **🧹 Clean Terminal Behaviour**: Tmux runs as the terminal's own process, so leaving it closes the tab, and relaunching a terminal reattaches instead of leaving you in a bare shell.
 

@@ -1,12 +1,19 @@
 import * as vscode from 'vscode';
-import { DEFAULT_SHELL_TOKEN, ProgramSpec, allBins, binOf, getDefaultShell, getProgramSpecs, probeBins, resetAvailability, sanitizeSpecs } from './programs';
+import { ProgramSpec, allBins, getDefaultShell, probeBins, resetAvailability, sanitizeSpecs } from './programs';
 
 /**
  * The settings page: a webview form in the same style as the create form.
  * Values live in the tmuxSidebar.* configuration — this page is an editor for
- * it, so plain settings.json editing keeps working and Reset to defaults is
- * just removing the overrides.
+ * it, so plain settings.json editing keeps working.
+ *
+ * The page edits one scope at a time, chosen by tabs: Global (user settings,
+ * the default) or Workspace. Saving globally also removes the workspace
+ * overrides, so what was just saved is what applies here. Reset in the
+ * workspace scope drops back to the global settings; reset in the global
+ * scope goes back to the defaults everywhere — workspace overrides included.
  */
+
+type SettingsScope = 'global' | 'workspace';
 
 interface SettingsState {
     autoRefreshEnabled: boolean;
@@ -15,13 +22,39 @@ interface SettingsState {
     programs: ProgramSpec[];
 }
 
-function readSettings(): SettingsState {
+const SETTING_KEYS = ['autoRefresh.enabled', 'autoRefresh.intervalSeconds', 'newTerminalLocation', 'programs'];
+
+const hasWorkspace = (): boolean => (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+
+// What the chosen scope's effective value is: the workspace tab shows what
+// applies in this window, the global tab shows user settings as if no
+// workspace override existed.
+function scopedValue<T>(key: string, scope: SettingsScope): T | undefined {
+    const inspected = vscode.workspace.getConfiguration('tmuxSidebar').inspect<T>(key);
+    if (!inspected) {
+        return undefined;
+    }
+    return scope === 'workspace'
+        ? inspected.workspaceValue ?? inspected.globalValue ?? inspected.defaultValue
+        : inspected.globalValue ?? inspected.defaultValue;
+}
+
+function workspaceOverridden(): boolean {
     const config = vscode.workspace.getConfiguration('tmuxSidebar');
+    return SETTING_KEYS.some(key => config.inspect(key)?.workspaceValue !== undefined);
+}
+
+function readSettings(scope: SettingsScope): SettingsState {
+    let programs = sanitizeSpecs(scopedValue<unknown>('programs', scope));
+    if (programs.length === 0) {
+        // A value so broken nothing survives is shown as the default list.
+        programs = sanitizeSpecs(vscode.workspace.getConfiguration('tmuxSidebar').inspect('programs')?.defaultValue);
+    }
     return {
-        autoRefreshEnabled: config.get<boolean>('autoRefresh.enabled', true),
-        autoRefreshInterval: config.get<number>('autoRefresh.intervalSeconds', 3),
-        terminalLocation: config.get<string>('newTerminalLocation', 'vscode'),
-        programs: getProgramSpecs()
+        autoRefreshEnabled: scopedValue<boolean>('autoRefresh.enabled', scope) ?? true,
+        autoRefreshInterval: scopedValue<number>('autoRefresh.intervalSeconds', scope) ?? 3,
+        terminalLocation: scopedValue<string>('newTerminalLocation', scope) ?? 'vscode',
+        programs
     };
 }
 
@@ -52,31 +85,54 @@ export function openSettingsPanel(extensionUri: vscode.Uri): void {
         current = undefined;
     });
 
-    const postState = async () => {
-        const settings = readSettings();
+    const postState = async (scope: SettingsScope) => {
+        const settings = readSettings(scope);
         const availability = await probeBins(allBins(settings.programs));
         const shell = await getDefaultShell();
-        void panel.webview.postMessage({ type: 'state', settings, availability, defaultShell: shell });
+        void panel.webview.postMessage({
+            type: 'state', scope, settings, availability, defaultShell: shell,
+            hasWorkspace: hasWorkspace(), workspaceOverridden: workspaceOverridden()
+        });
+    };
+
+    // Removing overrides in a scope: reused by both reset flavours.
+    const clearScope = async (target: vscode.ConfigurationTarget) => {
+        const config = vscode.workspace.getConfiguration('tmuxSidebar');
+        for (const key of SETTING_KEYS) {
+            await config.update(key, undefined, target);
+        }
     };
 
     panel.webview.html = html();
 
     panel.webview.onDidReceiveMessage(async (msg: any) => {
+        const scope: SettingsScope = msg.scope === 'workspace' && hasWorkspace() ? 'workspace' : 'global';
         if (msg.type === 'ready') {
             // Sent by the script on every (re)load, so a webview VS Code chose
             // to recreate anyway still gets its data.
-            await postState();
+            await postState('global');
+        } else if (msg.type === 'loadScope') {
+            await postState(scope);
+        } else if (msg.type === 'dirty') {
+            // The tab title carries the unsaved-changes dot, like an editor's.
+            panel.title = msg.dirty ? 'Tmux Sidebar Settings ●' : 'Tmux Sidebar Settings';
         } else if (msg.type === 'save') {
             const config = vscode.workspace.getConfiguration('tmuxSidebar');
+            const target = scope === 'workspace' ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
             const programs = sanitizeSpecs(msg.settings?.programs);
             const interval = Number(msg.settings?.autoRefreshInterval);
             try {
-                await config.update('autoRefresh.enabled', Boolean(msg.settings?.autoRefreshEnabled), vscode.ConfigurationTarget.Global);
-                await config.update('autoRefresh.intervalSeconds', Number.isFinite(interval) && interval >= 1 ? interval : 3, vscode.ConfigurationTarget.Global);
+                await config.update('autoRefresh.enabled', Boolean(msg.settings?.autoRefreshEnabled), target);
+                await config.update('autoRefresh.intervalSeconds', Number.isFinite(interval) && interval >= 1 ? interval : 3, target);
                 const location = ['vscode', 'editor', 'panel'].includes(msg.settings?.terminalLocation) ? msg.settings.terminalLocation : 'vscode';
-                await config.update('newTerminalLocation', location, vscode.ConfigurationTarget.Global);
-                await config.update('programs', programs, vscode.ConfigurationTarget.Global);
-                void panel.webview.postMessage({ type: 'saved' });
+                await config.update('newTerminalLocation', location, target);
+                await config.update('programs', programs, target);
+                if (scope === 'global' && hasWorkspace()) {
+                    // Saving globally means "use this here too" — drop the
+                    // workspace overrides that would shadow it.
+                    await clearScope(vscode.ConfigurationTarget.Workspace);
+                }
+                void panel.webview.postMessage({ type: 'saved', workspaceOverridden: workspaceOverridden() });
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 void panel.webview.postMessage({ type: 'error', message: `Could not save settings: ${message}` });
@@ -95,18 +151,20 @@ export function openSettingsPanel(extensionUri: vscode.Uri): void {
             const shell = await getDefaultShell();
             void panel.webview.postMessage({ type: 'availability', availability, defaultShell: shell, rechecked: true });
         } else if (msg.type === 'reset') {
-            const answer = await vscode.window.showWarningMessage(
-                'Reset Tmux Sidebar settings to their defaults? Your program list customisations will be lost.',
-                { modal: true },
-                'Reset'
-            );
+            const prompt = scope === 'workspace'
+                ? 'Remove this workspace\'s Tmux Sidebar overrides? The workspace will follow the global settings again.'
+                : 'Reset Tmux Sidebar settings to their defaults? This resets the global settings and removes any workspace overrides.';
+            const answer = await vscode.window.showWarningMessage(prompt, { modal: true }, 'Reset');
             if (answer === 'Reset') {
-                const config = vscode.workspace.getConfiguration('tmuxSidebar');
-                await config.update('autoRefresh.enabled', undefined, vscode.ConfigurationTarget.Global);
-                await config.update('autoRefresh.intervalSeconds', undefined, vscode.ConfigurationTarget.Global);
-                await config.update('newTerminalLocation', undefined, vscode.ConfigurationTarget.Global);
-                await config.update('programs', undefined, vscode.ConfigurationTarget.Global);
-                await postState();
+                if (scope === 'workspace') {
+                    await clearScope(vscode.ConfigurationTarget.Workspace);
+                } else {
+                    await clearScope(vscode.ConfigurationTarget.Global);
+                    if (hasWorkspace()) {
+                        await clearScope(vscode.ConfigurationTarget.Workspace);
+                    }
+                }
+                await postState(scope);
             }
         }
     });
@@ -167,6 +225,16 @@ function html(): string {
             background: var(--vscode-editor-background, var(--vscode-panel-background)); border-top: 1px solid var(--vscode-panel-border); }
   .flash { color: var(--vscode-terminal-ansiGreen, #3fb950); font-size: .92em; }
   .error { color: var(--vscode-inputValidation-errorForeground, #f14c4c); font-size: .92em; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--vscode-panel-border); }
+  .tab {
+    padding: 6px 14px; cursor: pointer; border: 1px solid transparent; border-bottom: none;
+    border-radius: 4px 4px 0 0; color: var(--vscode-descriptionForeground); background: none; font-size: 1em;
+  }
+  .tab:hover { color: var(--vscode-foreground); }
+  .tab.on {
+    color: var(--vscode-foreground); font-weight: 600; margin-bottom: -1px;
+    border-color: var(--vscode-panel-border); background: var(--vscode-editor-background, transparent);
+  }
 </style>
 </head>
 <body>
@@ -178,6 +246,12 @@ let model = null;
 let availability = {};
 let defaultShell = '';
 let probeTimer = null;
+// Which scope the page is editing, and what the extension knows about it.
+let scope = 'global';
+let hasWs = false;
+let wsOverridden = false;
+// Guards tab switching against silently losing unsaved edits.
+let pendingSwitch = false;
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
@@ -257,8 +331,14 @@ function paintDots() {
 }
 
 let dirty = false;
+function setDirty(value) {
+  if (dirty !== value) {
+    dirty = value;
+    vscode.postMessage({ type: 'dirty', dirty: value }); // the ● in the tab title
+  }
+}
 function markDirty() {
-  dirty = true;
+  setDirty(true);
   const f = document.getElementById('flash'); if (f) f.textContent = '';
 }
 
@@ -331,10 +411,39 @@ function programCard(p, index) {
   return card;
 }
 
+// Switching scope reloads that scope's stored values; unsaved edits would be
+// lost, so a dirty form asks for a second click to confirm.
+function switchScope(to) {
+  if (to === scope) { return; }
+  if (dirty && !pendingSwitch) {
+    pendingSwitch = true;
+    const err = document.getElementById('err');
+    if (err) err.textContent = 'Unsaved changes will be lost — click the tab again to switch anyway.';
+    return;
+  }
+  vscode.postMessage({ type: 'loadScope', scope: to });
+}
+
 function render() {
   const root = document.getElementById('form');
   root.innerHTML = '';
   root.appendChild(el('h1', null, 'Tmux Sidebar Settings'));
+
+  // Scope tabs — only meaningful when a workspace is open.
+  if (hasWs) {
+    const tabs = el('div', 'tabs');
+    for (const [value, name] of [['global', 'Global'], ['workspace', 'This workspace']]) {
+      const t = el('button', 'tab' + (scope === value ? ' on' : ''), name);
+      t.onclick = () => switchScope(value);
+      tabs.appendChild(t);
+    }
+    root.appendChild(tabs);
+    root.appendChild(el('div', 'hint', scope === 'workspace'
+      ? (wsOverridden ? 'This workspace has its own settings; they take precedence over the global ones.'
+                      : 'This workspace follows the global settings. Saving here gives it its own.')
+      : (wsOverridden ? 'Editing the global settings. This workspace currently has overrides — saving removes them, so the saved values apply here too.'
+                      : 'Editing the global settings, which apply everywhere.')));
+  }
 
   // Auto refresh
   const ar = el('div', 'field');
@@ -391,13 +500,13 @@ function render() {
     const bad = model.programs.findIndex(p => p.commands.every(c => !c.trim()));
     if (bad >= 0) { err.textContent = 'Group ' + (bad + 1) + ' has no commands — every group needs at least one.'; return; }
     err.textContent = '';
-    vscode.postMessage({ type: 'save', settings: serialize() });
+    vscode.postMessage({ type: 'save', scope, settings: serialize() });
   };
   const recheck = el('button', 'act secondary', 'Re-check installed tools');
   recheck.onclick = () => { recheck.disabled = true; vscode.postMessage({ type: 'recheck', bins: allFormBins() }); };
   recheck.id = 'recheck';
-  const reset = el('button', 'act secondary', 'Reset to defaults');
-  reset.onclick = () => vscode.postMessage({ type: 'reset' });
+  const reset = el('button', 'act secondary', scope === 'workspace' ? 'Reset to global' : 'Reset to defaults');
+  reset.onclick = () => vscode.postMessage({ type: 'reset', scope });
   footer.appendChild(save); footer.appendChild(recheck); footer.appendChild(reset);
   footer.appendChild(el('span', 'flash', '')).id = 'flash';
   footer.appendChild(el('span', 'error', '')).id = 'err';
@@ -426,6 +535,10 @@ window.addEventListener('message', e => {
   if (m.type === 'state') {
     availability = m.availability || {};
     defaultShell = m.defaultShell || '';
+    scope = m.scope || 'global';
+    hasWs = Boolean(m.hasWorkspace);
+    wsOverridden = Boolean(m.workspaceOverridden);
+    pendingSwitch = false;
     const s = m.settings;
     model = {
       autoRefreshEnabled: s.autoRefreshEnabled,
@@ -436,7 +549,7 @@ window.addEventListener('message', e => {
         custom: p.custom ? { prefix: p.custom.prefix, hint: p.custom.hint || '' } : null
       }))
     };
-    dirty = false;
+    setDirty(false);
     render();
   } else if (m.type === 'availability') {
     availability = Object.assign({}, availability, m.availability);
@@ -446,7 +559,9 @@ window.addEventListener('message', e => {
     if (btn) btn.disabled = false;
     if (m.rechecked) { const f = document.getElementById('flash'); if (f) f.textContent = 'Tools re-checked.'; }
   } else if (m.type === 'saved') {
-    dirty = false;
+    setDirty(false);
+    // A global save clears workspace overrides, so the scope hint may change.
+    if (m.workspaceOverridden !== undefined) { wsOverridden = Boolean(m.workspaceOverridden); render(); }
     const f = document.getElementById('flash'); if (f) f.textContent = 'Saved.';
   } else if (m.type === 'error') {
     const err = document.getElementById('err'); if (err) err.textContent = m.message;

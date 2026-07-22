@@ -38,11 +38,17 @@ const SPLIT_FLAGS: Record<SplitDirection, string> = {
 // where single quotes are ordinary characters — there it's double quotes, an
 // embedded quote doubled (the rule psmux's own argument parser follows), and a
 // trailing backslash doubled so it can't swallow the closing quote.
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
     if (process.platform === 'win32') {
         return `"${value.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`;
     }
     return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+// Routine successes go to the status bar rather than notification toasts, so
+// creating and killing things doesn't stack popups; failures stay loud.
+function statusMessage(message: string): void {
+    vscode.window.setStatusBarMessage(message, 4000);
 }
 
 function launchArgs(options?: LaunchOptions): string {
@@ -146,7 +152,7 @@ export class TmuxService {
         // against a non-existent server, which would otherwise error out.
         let sessionsOutput: string;
         try {
-            const result = await exec(`${TMUX_BIN} list-sessions -F "#{session_name}:#{session_attached}:#{session_created}:#{session_activity}"`);
+            const result = await exec(`${TMUX_BIN} list-sessions -F "#{session_name}\t#{session_attached}\t#{session_created}\t#{session_activity}"`);
             sessionsOutput = result.stdout;
         } catch (error) {
             if (this.isNoServerError(error)) {
@@ -164,8 +170,8 @@ export class TmuxService {
 
         try {
             const [windowsOutput, panesOutput] = await Promise.all([
-                exec(`${TMUX_BIN} list-windows -a -F "#{session_name}:#{window_index}:#{window_name}:#{window_active}"`),
-                exec(`${TMUX_BIN} list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_current_command}:#{pane_current_path}:#{pane_active}:#{pane_pid}"`)
+                exec(`${TMUX_BIN} list-windows -a -F "#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}"`),
+                exec(`${TMUX_BIN} list-panes -a -F "#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_active}\t#{pane_pid}"`)
             ]);
 
             return this.parseTmuxData(sessionsOutput, windowsOutput.stdout, panesOutput.stdout);
@@ -180,12 +186,14 @@ export class TmuxService {
         }
     }
 
+    // Fields are tab-separated: a colon can legally appear inside a window
+    // name, a pane path or a command, which would shift every field after it.
     private parseTmuxData(sessionsData: string, windowsData: string, panesData: string): TmuxSession[] {
         // Parse sessions
         const sessionsMap = new Map<string, TmuxSession>();
         if (sessionsData) {
             sessionsData.trim().split('\n').forEach(line => {
-                const [name, attached, created, activity] = line.split(':');
+                const [name, attached, created, activity] = line.split('\t');
                 if (name) {
                     sessionsMap.set(name, {
                         name,
@@ -202,7 +210,7 @@ export class TmuxService {
         const panesByWindow = new Map<string, TmuxPane[]>();
         if (panesData) {
             panesData.trim().split('\n').forEach(line => {
-                const parts = line.split(':');
+                const parts = line.split('\t');
                 if (parts.length >= 7) {
                     const [sessionName, windowIndex, paneIndex, paneCommand, currentPath, isActive, pid] = parts;
                     const key = `${sessionName}:${windowIndex}`;
@@ -226,7 +234,7 @@ export class TmuxService {
         const windowsBySession = new Map<string, TmuxWindow[]>();
         if (windowsData) {
             windowsData.trim().split('\n').forEach(line => {
-                const [sessionName, windowIndex, windowName, isActive] = line.split(':');
+                const [sessionName, windowIndex, windowName, isActive] = line.split('\t');
                 if (sessionName && windowIndex) {
                     const key = `${sessionName}:${windowIndex}`;
                     if (!windowsBySession.has(sessionName)) {
@@ -288,69 +296,6 @@ export class TmuxService {
         return this.getTmuxTree();
     }
 
-    // Legacy method for backward compatibility
-    public async getTmuxTreeLegacy(): Promise<TmuxSession[]> {
-        try {
-            const [windowsOutput, panesOutput] = await Promise.all([
-                exec(`${TMUX_BIN} list-windows -a -F "#{session_name}:#{window_index}:#{window_name}"`),
-                exec(`${TMUX_BIN} list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_current_command}"`)
-            ]);
-
-            const panesByWindow: { [key: string]: TmuxPane[] } = {};
-            if (panesOutput.stdout) {
-                panesOutput.stdout.trim().split('\n').forEach(line => {
-                    const [sessionName, windowIndex, paneIndex, paneCommand] = line.split(':');
-                    const key = `${sessionName}:${windowIndex}`;
-                    if (!panesByWindow[key]) {
-                        panesByWindow[key] = [];
-                    }
-                    panesByWindow[key].push({ 
-                        sessionName, 
-                        windowIndex, 
-                        index: paneIndex, 
-                        command: paneCommand,
-                        currentPath: '~', // Legacy data doesn't have path
-                        isActive: false, // Legacy data doesn't have active status
-                        pid: 0 // Legacy data doesn't have pid
-                    });
-                });
-            }
-
-            const windowsBySession: { [key: string]: TmuxWindow[] } = {};
-            if (windowsOutput.stdout) {
-                windowsOutput.stdout.trim().split('\n').forEach(line => {
-                    const [sessionName, windowIndex, windowName] = line.split(':');
-                    const key = `${sessionName}:${windowIndex}`;
-                    if (!windowsBySession[sessionName]) {
-                        windowsBySession[sessionName] = [];
-                    }
-                    windowsBySession[sessionName].push({
-                        sessionName,
-                        index: windowIndex,
-                        name: windowName,
-                        isActive: false, // Legacy data doesn't have active status
-                        panes: panesByWindow[key] || []
-                    });
-                });
-            }
-
-            const sessions: TmuxSession[] = Object.keys(windowsBySession).map(sessionName => ({
-                name: sessionName,
-                isAttached: false, // Legacy data doesn't have attached status
-                created: '', // Legacy data doesn't have created time
-                lastActivity: '', // Legacy data doesn't have activity time
-                windows: windowsBySession[sessionName]
-            }));
-
-            return sessions;
-
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            vscode.window.showWarningMessage(`Failed to get tmux data (legacy mode): ${errorMessage}`);
-            return [];
-        }
-    }
-
     public async getSessions(): Promise<string[]> {
         if (!await this.checkTmuxInstallation()) {
             return [];
@@ -377,9 +322,9 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} rename-session -t "${oldName}" "${newName}"`);
+            await exec(`${TMUX_BIN} rename-session -t ${shellQuote(oldName)} ${shellQuote(newName)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Session renamed from "${oldName}" to "${newName}"`);
+            statusMessage(`Session renamed from "${oldName}" to "${newName}"`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Failed to rename session "${oldName}" to "${newName}": ${errorMessage}`);
@@ -393,9 +338,9 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} rename-window -t "${sessionName}:${windowIndex}" "${newName}"`);
+            await exec(`${TMUX_BIN} rename-window -t ${shellQuote(`${sessionName}:${windowIndex}`)} ${shellQuote(newName)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Window ${windowIndex} renamed to "${newName}"`);
+            statusMessage(`Window ${windowIndex} renamed to "${newName}"`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('session not found')) {
@@ -417,7 +362,7 @@ export class TmuxService {
         try {
             await exec(`${TMUX_BIN} new-session -d -s ${shellQuote(sessionName)}${launchArgs(options)}${launchCommand(options)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Created new session "${sessionName}"`);
+            statusMessage(`Created new session "${sessionName}"`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('duplicate session')) {
@@ -435,9 +380,9 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} kill-session -t "${sessionName}"`);
+            await exec(`${TMUX_BIN} kill-session -t ${shellQuote(sessionName)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Deleted session "${sessionName}"`);
+            statusMessage(`Deleted session "${sessionName}"`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('session not found')) {
@@ -455,9 +400,9 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} kill-window -t "${sessionName}:${windowIndex}"`);
+            await exec(`${TMUX_BIN} kill-window -t ${shellQuote(`${sessionName}:${windowIndex}`)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Killed window ${windowIndex} in session "${sessionName}"`);
+            statusMessage(`Killed window ${windowIndex} in session "${sessionName}"`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('window not found')) {
@@ -475,9 +420,9 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} kill-pane -t "${sessionName}:${windowIndex}.${paneIndex}"`);
+            await exec(`${TMUX_BIN} kill-pane -t ${shellQuote(`${sessionName}:${windowIndex}.${paneIndex}`)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Killed pane ${paneIndex} in window ${windowIndex}`);
+            statusMessage(`Killed pane ${paneIndex} in window ${windowIndex}`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('pane not found')) {
@@ -495,7 +440,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} select-window -t "${sessionName}:${windowIndex}"`);
+            await exec(`${TMUX_BIN} select-window -t ${shellQuote(`${sessionName}:${windowIndex}`)}`);
         } catch (error) {
             // Don't show error message here, as it might be confusing if attach works.
             // But log it for debugging
@@ -509,7 +454,7 @@ export class TmuxService {
         }
         
         try {
-            await exec(`${TMUX_BIN} select-pane -t "${sessionName}:${windowIndex}.${paneIndex}"`);
+            await exec(`${TMUX_BIN} select-pane -t ${shellQuote(`${sessionName}:${windowIndex}.${paneIndex}`)}`);
         } catch (error) {
             // Don't show error message here.
             // But log it for debugging
@@ -534,7 +479,7 @@ export class TmuxService {
             const message = windowName 
                 ? `Created new window "${windowName}" in session "${sessionName}"`
                 : `Created new window in session "${sessionName}"`;
-            vscode.window.showInformationMessage(message);
+            statusMessage(message);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('session not found')) {
@@ -554,7 +499,7 @@ export class TmuxService {
         try {
             await exec(`${TMUX_BIN} split-window -t ${shellQuote(targetPane)} ${SPLIT_FLAGS[direction]}${launchArgs(options)}${launchCommand(options)}`);
             this.clearCache(); // Clear cache after modification
-            vscode.window.showInformationMessage(`Split pane ${direction}`);
+            statusMessage(`Split pane ${direction}`);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage.includes('pane not found')) {

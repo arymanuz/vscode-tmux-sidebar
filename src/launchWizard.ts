@@ -37,6 +37,9 @@ interface Payload {
     // shown immediately and this arrives over a message.
     programs: ProgramData[] | null;
     preferred: 'editor' | 'panel';
+    // The composed command runs through the platform's shell, so in-form
+    // quoting (of a typed model name) must match it.
+    win: boolean;
 }
 
 function nonce(): string {
@@ -131,9 +134,11 @@ function effective(p) {
 }
 
 // A plain model name goes in as typed; only one the shell would misread — a
-// space, a quote, anything outside this set — gets quoted.
+// space, a quote, anything outside this set — gets quoted, in the syntax of
+// the shell that will run the command (cmd/powershell on Windows).
 function quoteModel(v) {
   if (/^[A-Za-z0-9._:/@+-]+$/.test(v)) { return v; }
+  if (DATA.win) { return '"' + v.split('"').join('""') + '"'; }
   return "'" + v.split("'").join("'\\\\''") + "'";
 }
 
@@ -144,7 +149,9 @@ function dirIcon(dir) {
     '<rect x="2" y="2.5" width="12" height="11" rx="1.7" fill="none" stroke="currentColor" stroke-width="1.1"/>' +
     '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="0.8" fill="currentColor"/></svg>';
 }
-function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
+// Content always goes in as text — command labels and folder names are user
+// data, and innerHTML would let a stray '<' swallow part of them.
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
 function submit(location, direction) {
   const manual = state.manual.trim();
@@ -158,7 +165,10 @@ function renderActions(root) {
   const actions = el('div', DATA.mode === 'split' ? 'actions split-actions' : 'actions');
   if (DATA.mode === 'split') {
     [['right','Split right'],['left','Split left'],['down','Split down'],['up','Split up']].forEach(([d,label]) => {
-      const b = el('button','act secondary', dirIcon(d) + '<span>'+label+'</span>'); b.onclick = () => submit(undefined, d); actions.appendChild(b);
+      const b = el('button','act secondary');
+      b.innerHTML = dirIcon(d); // static SVG only — the label is appended as text
+      b.appendChild(el('span', null, label));
+      b.onclick = () => submit(undefined, d); actions.appendChild(b);
     });
   } else if (DATA.mode === 'window') {
     const b = el('button','act','Create window'); b.onclick = () => submit(); actions.appendChild(b);
@@ -357,7 +367,8 @@ export async function runLaunchWizard(
         folders,
         defaultCwd: folders[0]?.path ?? '',
         programs: null,
-        preferred: preferredLocation()
+        preferred: preferredLocation(),
+        win: process.platform === 'win32'
     };
 
     const panel = vscode.window.createWebviewPanel(

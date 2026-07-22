@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as util from 'util';
 import { TMUX_BIN } from './tmuxService';
@@ -154,6 +155,36 @@ let defaultShellReal: string | undefined;
 
 const shq = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
 
+// Probing runs through the user's login shell — the same environment the
+// attach terminal gets (`$SHELL -lc`) — so a tool whose PATH is set up in the
+// profile (nvm and friends) gets its green dot too, not just a working
+// terminal. The commands sent through it are POSIX; a login shell that can't
+// run one (fish) makes the caller fall back to simpler per-binary checks,
+// which fish handles.
+function execLogin(command: string): Promise<{ stdout: string; stderr: string }> {
+    if (process.platform === 'win32') {
+        return exec(command);
+    }
+    return exec(`${process.env.SHELL || '/bin/bash'} -lc ${shq(command)}`);
+}
+
+// A command may name its binary by path rather than by PATH lookup; those are
+// checked on the filesystem directly.
+function isPathBin(bin: string): boolean {
+    return bin.includes('/') || (process.platform === 'win32' && bin.includes('\\'));
+}
+
+async function probePathBin(bin: string): Promise<string | false> {
+    try {
+        if (!fs.existsSync(bin)) {
+            return false;
+        }
+        return process.platform === 'win32' ? bin : await realpathOf(bin);
+    } catch {
+        return false;
+    }
+}
+
 /** Resolve symlinks; the input path is returned when realpath can't. */
 async function realpathOf(p: string): Promise<string> {
     if (process.platform === 'win32' || !p) {
@@ -174,7 +205,7 @@ async function probeOne(bin: string): Promise<string | false> {
             const first = stdout.split('\n')[0]?.trim();
             return first || false;
         }
-        const { stdout } = await exec(`command -v ${bin}`);
+        const { stdout } = await execLogin(`command -v ${bin}`);
         const p = stdout.trim();
         return p ? await realpathOf(p) : false;
     } catch {
@@ -182,8 +213,9 @@ async function probeOne(bin: string): Promise<string | false> {
     }
 }
 
-// A binary name goes into a shell command line, so only sane names are probed
-// at all; anything else is simply reported as not installed.
+// A PATH-looked-up binary name goes into a shell command line, so only sane
+// names are probed at all; anything else is simply reported as not installed.
+// (Binaries named by path bypass this — they are checked on the filesystem.)
 const SAFE_BIN = /^[A-Za-z0-9._+-]+$/;
 
 /**
@@ -195,10 +227,14 @@ const SAFE_BIN = /^[A-Za-z0-9._+-]+$/;
 export async function probeBins(bins: string[]): Promise<Record<string, string | false>> {
     const unique = [...new Set(bins.map(b => b.trim()).filter(Boolean))];
     const missing = unique.filter(bin => !availability.has(bin));
-    for (const bin of missing.filter(b => !SAFE_BIN.test(b))) {
+    for (const bin of missing.filter(isPathBin)) {
+        availability.set(bin, await probePathBin(bin));
+    }
+    const named = missing.filter(bin => !isPathBin(bin));
+    for (const bin of named.filter(b => !SAFE_BIN.test(b))) {
         availability.set(bin, false);
     }
-    const toProbe = missing.filter(bin => SAFE_BIN.test(bin));
+    const toProbe = named.filter(bin => SAFE_BIN.test(bin));
 
     if (toProbe.length > 0) {
         if (process.platform === 'win32') {
@@ -210,7 +246,7 @@ export async function probeBins(bins: string[]): Promise<Record<string, string |
                 .map(bin => `p=$(command -v ${bin} 2>/dev/null) && echo "${bin}=$(realpath "$p" 2>/dev/null || echo "$p")"`)
                 .join('; ')}; true`;
             try {
-                const { stdout } = await exec(script);
+                const { stdout } = await execLogin(script);
                 const found = new Map<string, string>();
                 for (const line of stdout.split('\n')) {
                     const at = line.indexOf('=');
@@ -253,7 +289,7 @@ export async function getDefaultShell(): Promise<string> {
     }
     let shell = '';
     try {
-        const { stdout } = await exec(`${TMUX_BIN} show-options -gv default-shell`);
+        const { stdout } = await execLogin(`${TMUX_BIN} show-options -gv default-shell`);
         shell = stdout.trim();
     } catch {
         // no server running — fall through

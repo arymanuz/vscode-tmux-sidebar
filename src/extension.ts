@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TmuxSessionProvider, TmuxSessionTreeItem, TmuxWindowTreeItem, TmuxPaneTreeItem } from './treeProvider';
-import { TmuxService, TMUX_BIN } from './tmuxService';
+import { TmuxService, TMUX_BIN, shellQuote } from './tmuxService';
 import { runLaunchWizard } from './launchWizard';
 import { warmUpPrograms } from './programs';
 import { openSettingsPanel } from './settingsPanel';
@@ -41,15 +41,40 @@ function createAttachTerminal(
         iconPath,
         location,
         shellPath: process.env.SHELL || '/bin/bash',
-        shellArgs: ['-lc', `exec ${TMUX_BIN} attach -t "${sessionName}"`]
+        shellArgs: ['-lc', `exec ${TMUX_BIN} attach -t ${shellQuote(sessionName)}`]
     });
+}
+
+// Successes show in the status bar; only failures interrupt with a popup.
+function statusMessage(message: string): void {
+    vscode.window.setStatusBarMessage(message, 4000);
+}
+
+// tmux rejects session names containing ':' or '.' (they are target syntax),
+// so catch them in the form instead of surfacing tmux's error after the fact.
+function validateSessionName(value: string, existing: string[]): string | undefined {
+    const name = value.trim();
+    if (!name) {
+        return 'Session name cannot be empty.';
+    }
+    if (/[:.]/.test(name)) {
+        return `Session names cannot contain ':' or '.'`;
+    }
+    if (existing.includes(name)) {
+        return `Session name "${name}" already exists.`;
+    }
+    return undefined;
 }
 
 export function activate(context: vscode.ExtensionContext) {
     const tmuxService = new TmuxService();
     const tmuxSessionProvider = new TmuxSessionProvider(tmuxService, context.extensionPath);
 
-    vscode.window.registerTreeDataProvider('vscode-tmux-sidebar', tmuxSessionProvider);
+    // createTreeView rather than registerTreeDataProvider for the visibility
+    // events: the auto-refresh timer pauses while the view is hidden.
+    const treeView = vscode.window.createTreeView('vscode-tmux-sidebar', { treeDataProvider: tmuxSessionProvider });
+    tmuxSessionProvider.setVisible(treeView.visible);
+    const visibilityListener = treeView.onDidChangeVisibility(e => tmuxSessionProvider.setVisible(e.visible));
 
     // Resolve which programs exist while the user is still reading the tree, so
     // opening the create form doesn't wait on it.
@@ -113,15 +138,15 @@ export function activate(context: vscode.ExtensionContext) {
             if (itemType === 'window') {
                 const windowItem = item as TmuxWindowTreeItem;
                 await tmuxService.selectWindow(windowItem.window.sessionName, windowItem.window.index);
-                vscode.window.showInformationMessage(`Switched to window ${windowItem.window.index}:${windowItem.window.name}`);
+                statusMessage(`Switched to window ${windowItem.window.index}:${windowItem.window.name}`);
             } else if (itemType === 'pane') {
                 const paneItem = item as TmuxPaneTreeItem;
                 // First select the window, then the pane
                 await tmuxService.selectWindow(paneItem.pane.sessionName, paneItem.pane.windowIndex);
                 await tmuxService.selectPane(paneItem.pane.sessionName, paneItem.pane.windowIndex, paneItem.pane.index);
-                vscode.window.showInformationMessage(`Switched to pane ${paneItem.pane.index} in window ${paneItem.pane.windowIndex}`);
+                statusMessage(`Switched to pane ${paneItem.pane.index} in window ${paneItem.pane.windowIndex}`);
             } else {
-                vscode.window.showInformationMessage(`Attached to session "${sessionName}"`);
+                statusMessage(`Attached to session "${sessionName}"`);
             }
         } else {
             // No existing terminal, create new one and attach
@@ -134,15 +159,15 @@ export function activate(context: vscode.ExtensionContext) {
             if (itemType === 'window') {
                 const windowItem = item as TmuxWindowTreeItem;
                 await tmuxService.selectWindow(windowItem.window.sessionName, windowItem.window.index);
-                vscode.window.showInformationMessage(`Attached to session "${sessionName}" and switched to window ${windowItem.window.index}:${windowItem.window.name}`);
+                statusMessage(`Attached to session "${sessionName}" and switched to window ${windowItem.window.index}:${windowItem.window.name}`);
             } else if (itemType === 'pane') {
                 const paneItem = item as TmuxPaneTreeItem;
                 // First select the window, then the pane
                 await tmuxService.selectWindow(paneItem.pane.sessionName, paneItem.pane.windowIndex);
                 await tmuxService.selectPane(paneItem.pane.sessionName, paneItem.pane.windowIndex, paneItem.pane.index);
-                vscode.window.showInformationMessage(`Attached to session "${sessionName}" and switched to pane ${paneItem.pane.index} in window ${paneItem.pane.windowIndex}`);
+                statusMessage(`Attached to session "${sessionName}" and switched to pane ${paneItem.pane.index} in window ${paneItem.pane.windowIndex}`);
             } else {
-                vscode.window.showInformationMessage(`Attached to session "${sessionName}"`);
+                statusMessage(`Attached to session "${sessionName}"`);
             }
         }
     });
@@ -168,7 +193,7 @@ export function activate(context: vscode.ExtensionContext) {
         const newName = await vscode.window.showInputBox({
             prompt: `Rename tmux session "${oldName}"`,
             value: oldName,
-            validateInput: value => value ? null : 'Session name cannot be empty.'
+            validateInput: value => value.trim() === oldName ? null : (validateSessionName(value, []) ?? null)
         });
 
         if (newName && newName !== oldName) {
@@ -217,15 +242,7 @@ export function activate(context: vscode.ExtensionContext) {
             nextId++;
         }
 
-        const choice = await runLaunchWizard('session', context.extensionUri, String(nextId), value => {
-            if (!value.trim()) {
-                return 'Session name cannot be empty.';
-            }
-            if (sessions.includes(value.trim())) {
-                return `Session name "${value.trim()}" already exists.`;
-            }
-            return undefined;
-        });
+        const choice = await runLaunchWizard('session', context.extensionUri, String(nextId), value => validateSessionName(value, sessions));
         if (!choice || !choice.name) {
             return;
         }
@@ -310,12 +327,14 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    const newWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.newWindow', async (item: TmuxSessionTreeItem) => {
+    // Registered under two ids — the context menu entry and the inline "+"
+    // button — with a single implementation.
+    const handleNewWindow = async (item: TmuxSessionTreeItem) => {
         if (!item || !item.session || !item.session.name) {
             vscode.window.showErrorMessage('Invalid session data for new window operation');
             return;
         }
-        
+
         const sessionName = item.session.name;
         const choice = await runLaunchWizard('window', context.extensionUri);
         if (!choice) {
@@ -328,7 +347,8 @@ export function activate(context: vscode.ExtensionContext) {
         } catch (error) {
             // Error is already shown by the service
         }
-    });
+    };
+    const newWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.newWindow', handleNewWindow);
 
     // Resolve the tmux target for a pane tree item, reporting why if it can't.
     const targetOf = (item: TmuxPaneTreeItem): string | undefined => {
@@ -363,27 +383,11 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
 
-    const inlineNewWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.inline.newWindow', async (item: TmuxSessionTreeItem) => {
-        if (!item || !item.session || !item.session.name) {
-            vscode.window.showErrorMessage('Invalid session data for new window operation');
-            return;
-        }
-        
-        const sessionName = item.session.name;
-        const choice = await runLaunchWizard('window', context.extensionUri);
-        if (!choice) {
-            return;
-        }
-
-        try {
-            await tmuxService.newWindow(sessionName, choice.name, choice);
-            tmuxSessionProvider.refresh();
-        } catch (error) {
-            // Error is already shown by the service
-        }
-    });
+    const inlineNewWindowCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.inline.newWindow', handleNewWindow);
 
     context.subscriptions.push(
+        treeView,
+        visibilityListener,
         attachCommand,
         refreshCommand,
         settingsCommand,
