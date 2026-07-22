@@ -173,9 +173,8 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const refreshCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.refresh', async () => {
-        // Force fresh data by clearing cache
-        await tmuxService.getTmuxTreeFresh();
-        tmuxSessionProvider.refresh();
+        // Fresh data, but only repaint when it differs — no flicker otherwise.
+        await tmuxSessionProvider.refreshIfChanged();
     });
 
     const settingsCommand = vscode.commands.registerCommand('vscode-tmux-sidebar.settings', () => {

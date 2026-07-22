@@ -11,6 +11,10 @@ export class TmuxSessionProvider implements vscode.TreeDataProvider<TmuxTreeItem
     private autoRefreshInterval: NodeJS.Timeout | undefined;
     private readonly configListener: vscode.Disposable;
     private visible = true;
+    // What the view currently shows, serialized — the auto-refresh tick only
+    // repaints when the tmux state actually differs, so an idle sidebar
+    // doesn't flicker every few seconds.
+    private lastSnapshot = '';
 
     constructor(private tmuxService: TmuxService, private extensionPath: string) {
         this.applyAutoRefreshSettings();
@@ -27,6 +31,16 @@ export class TmuxSessionProvider implements vscode.TreeDataProvider<TmuxTreeItem
         this._onDidChangeTreeData.fire();
     }
 
+    // Fetch fresh data and repaint only if it changed. Used by the periodic
+    // and manual refreshes; after a known mutation, plain refresh() is right.
+    async refreshIfChanged(): Promise<void> {
+        const sessions = await this.tmuxService.getTmuxTreeFresh();
+        const snapshot = JSON.stringify(sessions);
+        if (snapshot !== this.lastSnapshot) {
+            this.refresh();
+        }
+    }
+
     // The auto-refresh timer only runs while the view is on screen — polling
     // tmux every few seconds behind a hidden panel is pure waste.
     setVisible(visible: boolean): void {
@@ -36,7 +50,7 @@ export class TmuxSessionProvider implements vscode.TreeDataProvider<TmuxTreeItem
         this.visible = visible;
         this.applyAutoRefreshSettings();
         if (visible) {
-            this.refresh();
+            void this.refreshIfChanged();
         }
     }
 
@@ -51,7 +65,7 @@ export class TmuxSessionProvider implements vscode.TreeDataProvider<TmuxTreeItem
             return;
         }
         const seconds = Math.max(1, config.get<number>('intervalSeconds', 3));
-        this.autoRefreshInterval = setInterval(() => this.refresh(), seconds * 1000);
+        this.autoRefreshInterval = setInterval(() => void this.refreshIfChanged(), seconds * 1000);
     }
 
     dispose(): void {
@@ -86,6 +100,7 @@ export class TmuxSessionProvider implements vscode.TreeDataProvider<TmuxTreeItem
         // With no sessions the tree must be genuinely empty: only then does
         // VS Code show the viewsWelcome content with its New Session button.
         const sessions = await this.tmuxService.getTmuxTree();
+        this.lastSnapshot = JSON.stringify(sessions);
         return sessions.map(session => new TmuxSessionTreeItem(session));
     }
 }
@@ -94,6 +109,9 @@ export class TmuxSessionTreeItem extends vscode.TreeItem {
     constructor(public readonly session: TmuxSession) {
         const label = session.name;
         super(label, vscode.TreeItemCollapsibleState.Expanded);
+        // Stable ids let VS Code match items across repaints, keeping the
+        // selection and expansion state instead of visibly rebuilding rows.
+        this.id = `s:${session.name}`;
         this.contextValue = 'tmuxSession';
         this.iconPath = new vscode.ThemeIcon('server');
         
@@ -121,6 +139,7 @@ export class TmuxWindowTreeItem extends vscode.TreeItem {
     constructor(public readonly window: TmuxWindow, extensionPath: string, public readonly sessionAttached: boolean) {
         const label = `${window.index}:${window.name}`;
         super(label, vscode.TreeItemCollapsibleState.Expanded);
+        this.id = `w:${window.sessionName}:${window.index}`;
         this.contextValue = 'tmuxWindow';
         this.iconPath = new vscode.ThemeIcon('window');
         
@@ -148,6 +167,7 @@ export class TmuxPaneTreeItem extends vscode.TreeItem {
     constructor(public readonly pane: TmuxPane, extensionPath: string, sessionAttached: boolean, windowActive: boolean) {
         const label = `${pane.index}: ${pane.command}`;
         super(label, vscode.TreeItemCollapsibleState.None);
+        this.id = `p:${pane.sessionName}:${pane.windowIndex}.${pane.index}`;
         this.contextValue = 'tmuxPane';
         
         const iconName = TmuxPaneTreeItem.getCommandIconName(pane.command);
