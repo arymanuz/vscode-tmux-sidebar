@@ -156,7 +156,7 @@ class TmuxService {
         // against a non-existent server, which would otherwise error out.
         let sessionsOutput;
         try {
-            const result = await exec(`${exports.TMUX_BIN} list-sessions -F "#{session_name}\t#{session_attached}\t#{session_created}\t#{session_activity}"`);
+            const result = await exec(`${exports.TMUX_BIN} list-sessions -F "#{session_attached}:#{session_created}:#{session_activity}:#{session_name}"`);
             sessionsOutput = result.stdout;
         }
         catch (error) {
@@ -173,8 +173,8 @@ class TmuxService {
         }
         try {
             const [windowsOutput, panesOutput] = await Promise.all([
-                exec(`${exports.TMUX_BIN} list-windows -a -F "#{session_name}\t#{window_index}\t#{window_name}\t#{window_active}"`),
-                exec(`${exports.TMUX_BIN} list-panes -a -F "#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_active}\t#{pane_pid}"`)
+                exec(`${exports.TMUX_BIN} list-windows -a -F "#{session_name}:#{window_index}:#{window_active}:#{window_name}"`),
+                exec(`${exports.TMUX_BIN} list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}:#{pane_active}:#{pane_pid}:#{pane_current_command}:#{pane_current_path}"`)
             ]);
             return this.parseTmuxData(sessionsOutput, windowsOutput.stdout, panesOutput.stdout);
         }
@@ -188,18 +188,25 @@ class TmuxService {
             throw error;
         }
     }
-    // Fields are tab-separated: a colon can legally appear inside a window
-    // name, a pane path or a command, which would shift every field after it.
+    // The separator must be printable ASCII: for a client without a UTF-8
+    // locale (bare docker containers, ssh without locale forwarding) tmux
+    // sanitizes command output, turning control characters — a tab too — into
+    // '_'. So fields are colon-separated with the one free-text field last on
+    // each line, rejoined from the tail; a session name is safe in front
+    // because tmux itself forbids ':' in it.
     parseTmuxData(sessionsData, windowsData, panesData) {
         // Parse sessions
         const sessionsMap = new Map();
         if (sessionsData) {
             sessionsData.trim().split('\n').forEach(line => {
-                const [name, attached, created, activity] = line.split('\t');
-                if (name) {
+                const parts = line.split(':');
+                if (parts.length >= 4) {
+                    const [attached, created, activity] = parts;
+                    const name = parts.slice(3).join(':');
                     sessionsMap.set(name, {
                         name,
-                        isAttached: attached === '1',
+                        // session_attached counts clients — 2 is attached too.
+                        isAttached: (parseInt(attached) || 0) > 0,
                         created,
                         lastActivity: activity,
                         windows: []
@@ -211,9 +218,10 @@ class TmuxService {
         const panesByWindow = new Map();
         if (panesData) {
             panesData.trim().split('\n').forEach(line => {
-                const parts = line.split('\t');
+                const parts = line.split(':');
                 if (parts.length >= 7) {
-                    const [sessionName, windowIndex, paneIndex, paneCommand, currentPath, isActive, pid] = parts;
+                    const [sessionName, windowIndex, paneIndex, isActive, pid, paneCommand] = parts;
+                    const currentPath = parts.slice(6).join(':');
                     const key = `${sessionName}:${windowIndex}`;
                     if (!panesByWindow.has(key)) {
                         panesByWindow.set(key, []);
@@ -234,7 +242,9 @@ class TmuxService {
         const windowsBySession = new Map();
         if (windowsData) {
             windowsData.trim().split('\n').forEach(line => {
-                const [sessionName, windowIndex, windowName, isActive] = line.split('\t');
+                const parts = line.split(':');
+                const [sessionName, windowIndex, isActive] = parts;
+                const windowName = parts.slice(3).join(':');
                 if (sessionName && windowIndex) {
                     const key = `${sessionName}:${windowIndex}`;
                     if (!windowsBySession.has(sessionName)) {
