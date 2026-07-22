@@ -14,7 +14,13 @@ function createAttachTerminal(
     sessionName: string,
     location?: vscode.TerminalLocation
 ): vscode.Terminal {
-    const iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.svg');
+    // Tab icons are rendered as plain images, not tinted like tree icons, so
+    // currentColor would come out black on every theme — use concrete
+    // per-theme variants instead.
+    const iconPath = {
+        light: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-light.svg'),
+        dark: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-dark.svg')
+    };
 
     if (process.platform === 'win32') {
         // psmux is a native binary and doesn't rely on a shell to set up the

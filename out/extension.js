@@ -45,7 +45,13 @@ const settingsPanel_1 = require("./settingsPanel");
 // multiplexer the terminal's main process so that exiting it closes the tab
 // (instead of dropping back into a shell).
 function createAttachTerminal(context, terminalName, sessionName, location) {
-    const iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.svg');
+    // Tab icons are rendered as plain images, not tinted like tree icons, so
+    // currentColor would come out black on every theme — use concrete
+    // per-theme variants instead.
+    const iconPath = {
+        light: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-light.svg'),
+        dark: vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon-dark.svg')
+    };
     if (process.platform === 'win32') {
         // psmux is a native binary and doesn't rely on a shell to set up the
         // environment, so run it directly as the terminal process.

@@ -372,7 +372,10 @@ async function runLaunchWizard(mode, extensionUri, suggestedName, validate) {
         win: process.platform === 'win32'
     };
     const panel = vscode.window.createWebviewPanel('tmuxSidebarCreate', mode === 'session' ? 'New session' : mode === 'window' ? 'New window' : 'Split pane', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [extensionUri] });
-    panel.iconPath = vscode.Uri.joinPath(extensionUri, 'resources', 'icon.svg');
+    panel.iconPath = {
+        light: vscode.Uri.joinPath(extensionUri, 'resources', 'icon-light.svg'),
+        dark: vscode.Uri.joinPath(extensionUri, 'resources', 'icon-dark.svg')
+    };
     panel.webview.html = html(payload);
     return new Promise(resolve => {
         let settled = false;

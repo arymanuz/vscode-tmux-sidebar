@@ -80,7 +80,10 @@ export function openSettingsPanel(extensionUri: vscode.Uri): void {
         }
     );
     current = panel;
-    panel.iconPath = vscode.Uri.joinPath(extensionUri, 'resources', 'icon.svg');
+    panel.iconPath = {
+        light: vscode.Uri.joinPath(extensionUri, 'resources', 'icon-light.svg'),
+        dark: vscode.Uri.joinPath(extensionUri, 'resources', 'icon-dark.svg')
+    };
     panel.onDidDispose(() => {
         current = undefined;
     });

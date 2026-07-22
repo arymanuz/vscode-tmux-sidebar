@@ -377,7 +377,10 @@ export async function runLaunchWizard(
         vscode.ViewColumn.Active,
         { enableScripts: true, localResourceRoots: [extensionUri] }
     );
-    panel.iconPath = vscode.Uri.joinPath(extensionUri, 'resources', 'icon.svg');
+    panel.iconPath = {
+        light: vscode.Uri.joinPath(extensionUri, 'resources', 'icon-light.svg'),
+        dark: vscode.Uri.joinPath(extensionUri, 'resources', 'icon-dark.svg')
+    };
     panel.webview.html = html(payload);
 
     return new Promise<LaunchChoice | undefined>(resolve => {
