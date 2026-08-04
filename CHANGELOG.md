@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.1] - unreleased
 
+### Added
+
+- Kimi Code (`kimi`) and OpenClaw (`openclaw chat` / `openclaw tui`) in the
+  default program list.
+- Richer default menus for the AI tools, with flags verified against each
+  tool's current documentation: resume/fork and model presets for codex
+  (gpt-5.6 family), resume for gemini and agy, continue/fork for opencode,
+  resume/fork for goose, continue for crush, architect and watch-files modes
+  for aider, and model/plan/continue presets for kimi. Free model fields for
+  codex, gemini, agy, kimi, aider and opencode.
+
 ### Changed
 
 - The settings page opens on the This workspace tab when the workspace has

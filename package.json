@@ -270,16 +270,23 @@
             {
               "commands": [
                 "codex",
-                "codex resume"
+                "codex resume",
+                "codex resume --last",
+                "codex fork --last",
+                "codex fork",
+                "codex -m gpt-5.6-sol",
+                "codex -m gpt-5.6-terra",
+                "codex -m gpt-5.6-luna"
               ],
               "custom": {
                 "prefix": "codex -m",
-                "hint": "Codex model name"
+                "hint": "Codex model, e.g. gpt-5.6-terra"
               }
             },
             {
               "commands": [
                 "gemini",
+                "gemini --resume latest",
                 "gemini -m auto",
                 "gemini -m pro",
                 "gemini -m flash",
@@ -292,17 +299,40 @@
             },
             {
               "commands": [
-                "agy"
+                "agy",
+                "agy --continue"
               ],
               "custom": {
                 "prefix": "agy --model",
-                "hint": "Antigravity model, e.g. Gemini 3 Pro"
+                "hint": "Antigravity model — a name from `agy models`"
               }
             },
             {
               "commands": [
+                "kimi",
+                "kimi --continue",
+                "kimi --session",
+                "kimi --plan",
+                "kimi -m kimi-for-coding",
+                "kimi -m kimi-k2-thinking"
+              ],
+              "custom": {
+                "prefix": "kimi -m",
+                "hint": "Kimi model alias, e.g. kimi-k2.6"
+              }
+            },
+            {
+              "commands": [
+                "openclaw chat",
+                "openclaw tui"
+              ]
+            },
+            {
+              "commands": [
                 "aider",
-                "aider --restore-chat-history"
+                "aider --restore-chat-history",
+                "aider --architect",
+                "aider --watch-files"
               ],
               "custom": {
                 "prefix": "aider --model",
@@ -311,17 +341,26 @@
             },
             {
               "commands": [
-                "opencode"
+                "opencode",
+                "opencode --continue",
+                "opencode --continue --fork"
+              ],
+              "custom": {
+                "prefix": "opencode -m",
+                "hint": "provider/model, e.g. anthropic/claude-sonnet-4-5"
+              }
+            },
+            {
+              "commands": [
+                "goose",
+                "goose session --resume",
+                "goose session --resume --fork"
               ]
             },
             {
               "commands": [
-                "goose"
-              ]
-            },
-            {
-              "commands": [
-                "crush"
+                "crush",
+                "crush --continue"
               ]
             },
             {
