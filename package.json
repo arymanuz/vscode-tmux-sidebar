@@ -2,7 +2,7 @@
   "name": "vscode-tmux-sidebar",
   "displayName": "Tmux Sidebar",
   "description": "Manage tmux sessions, windows and panes from the VS Code sidebar — including WSL, SSH remotes and Windows via psmux.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "arymanuz",
   "icon": "resources/icon-gallery.png",
   "repository": {

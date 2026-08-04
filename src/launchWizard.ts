@@ -334,14 +334,20 @@ window.addEventListener('message', e => {
   else if (m.type === 'programs') {
     DATA.programs = m.programs || [];
     if (!state.program) { state.program = DATA.programs[0] || null; }
-    // The list can land mid-word, so put the caret back exactly where it was.
+    // The list can land mid-word — or while the prefilled name is still
+    // fully selected right after opening — so restore the selection exactly,
+    // not just a collapsed caret.
     const before = document.getElementById('name');
     const typing = before && document.activeElement === before;
-    const caret = typing ? before.selectionStart : null;
+    const selStart = typing ? before.selectionStart : null;
+    const selEnd = typing ? before.selectionEnd : null;
     render();
     if (typing) {
       const after = document.getElementById('name');
-      if (after) { after.focus(); const at = caret === null ? after.value.length : caret; after.setSelectionRange(at, at); }
+      if (after) {
+        after.focus();
+        after.setSelectionRange(selStart === null ? after.value.length : selStart, selEnd === null ? after.value.length : selEnd);
+      }
     }
   }
 });
