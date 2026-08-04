@@ -271,12 +271,7 @@
               "commands": [
                 "codex",
                 "codex resume",
-                "codex resume --last",
-                "codex fork --last",
-                "codex fork",
-                "codex -m gpt-5.6-sol",
-                "codex -m gpt-5.6-terra",
-                "codex -m gpt-5.6-luna"
+                "codex fork"
               ],
               "custom": {
                 "prefix": "codex -m",
@@ -286,7 +281,6 @@
             {
               "commands": [
                 "gemini",
-                "gemini --resume latest",
                 "gemini -m auto",
                 "gemini -m pro",
                 "gemini -m flash",
@@ -299,8 +293,7 @@
             },
             {
               "commands": [
-                "agy",
-                "agy --continue"
+                "agy"
               ],
               "custom": {
                 "prefix": "agy --model",
@@ -310,11 +303,9 @@
             {
               "commands": [
                 "kimi",
-                "kimi --continue",
                 "kimi --session",
                 "kimi --plan",
-                "kimi -m kimi-for-coding",
-                "kimi -m kimi-k2-thinking"
+                "kimi -m kimi-for-coding"
               ],
               "custom": {
                 "prefix": "kimi -m",
@@ -341,9 +332,7 @@
             },
             {
               "commands": [
-                "opencode",
-                "opencode --continue",
-                "opencode --continue --fork"
+                "opencode"
               ],
               "custom": {
                 "prefix": "opencode -m",
@@ -352,15 +341,12 @@
             },
             {
               "commands": [
-                "goose",
-                "goose session --resume",
-                "goose session --resume --fork"
+                "goose"
               ]
             },
             {
               "commands": [
-                "crush",
-                "crush --continue"
+                "crush"
               ]
             },
             {

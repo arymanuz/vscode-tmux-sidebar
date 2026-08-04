@@ -12,11 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Kimi Code (`kimi`) and OpenClaw (`openclaw chat` / `openclaw tui`) in the
   default program list.
 - Richer default menus for the AI tools, with flags verified against each
-  tool's current documentation: resume/fork and model presets for codex
-  (gpt-5.6 family), resume for gemini and agy, continue/fork for opencode,
-  resume/fork for goose, continue for crush, architect and watch-files modes
-  for aider, and model/plan/continue presets for kimi. Free model fields for
-  codex, gemini, agy, kimi, aider and opencode.
+  tool's current documentation: codex gains resume and fork (both open the
+  tool's own session picker), kimi gains its session picker, plan mode and
+  the stable kimi-for-coding alias, aider gains architect and watch-files
+  modes, and codex and opencode gain free model fields (joining claude,
+  gemini, agy, kimi and aider). Presets that would silently resume "the
+  most recent" session are deliberately absent — with several tmux panes
+  which session is most recent is anyone's guess — as are pinned model
+  versions, which age faster than the extension updates.
 
 ### Changed
 
