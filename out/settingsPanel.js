@@ -110,8 +110,10 @@ function openSettingsPanel(extensionUri) {
         const scope = msg.scope === 'workspace' && hasWorkspace() ? 'workspace' : 'global';
         if (msg.type === 'ready') {
             // Sent by the script on every (re)load, so a webview VS Code chose
-            // to recreate anyway still gets its data.
-            await postState('global');
+            // to recreate anyway still gets its data. Open on the scope that
+            // actually governs this window: the workspace tab when overrides
+            // exist here, the global one otherwise.
+            await postState(hasWorkspace() && workspaceOverridden() ? 'workspace' : 'global');
         }
         else if (msg.type === 'loadScope') {
             await postState(scope);

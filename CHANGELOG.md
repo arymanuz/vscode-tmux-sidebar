@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.1] - unreleased
 
+### Changed
+
+- The settings page opens on the This workspace tab when the workspace has
+  its own overrides, since that is what governs the current window; on the
+  Global tab otherwise.
+
 ### Fixed
 
 - The suggested session name stays fully selected when the form opens, so
